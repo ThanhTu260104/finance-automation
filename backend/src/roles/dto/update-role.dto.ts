@@ -1,0 +1,13 @@
+import { PartialType, OmitType } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsBoolean, IsOptional } from 'class-validator';
+import { CreateRoleDto } from './create-role.dto';
+
+export class UpdateRoleDto extends PartialType(
+  OmitType(CreateRoleDto, ['code'] as const),
+) {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}

@@ -1,0 +1,350 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// --- Legacy invoice module (giữ DB cũ) ---
+enum InvoiceStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+enum InvoiceType {
+  INPUT
+  OUTPUT
+}
+
+model Invoice {
+  id               String        @id @default(cuid())
+  invoiceNumber    String        @unique @map("invoice_number")
+  type             InvoiceType   @default(OUTPUT)
+  status           InvoiceStatus @default(DRAFT)
+  customerName     String        @map("customer_name")
+  customerTaxCode  String?       @map("customer_tax_code")
+  customerAddress  String?       @map("customer_address")
+  customerEmail    String?       @map("customer_email")
+  issueDate        DateTime      @default(now()) @map("issue_date")
+  dueDate          DateTime?     @map("due_date")
+  notes            String?
+  subtotal         Decimal       @default(0) @db.Decimal(18, 2)
+  taxRate          Decimal       @default(10) @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount        Decimal       @default(0) @map("tax_amount") @db.Decimal(18, 2)
+  totalAmount      Decimal       @default(0) @map("total_amount") @db.Decimal(18, 2)
+  duplicatedFromId String?       @map("duplicated_from_id")
+  duplicatedFrom   Invoice?      @relation("InvoiceDuplicates", fields: [duplicatedFromId], references: [id], onDelete: SetNull)
+  duplicates       Invoice[]     @relation("InvoiceDuplicates")
+  items            InvoiceItem[]
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([issueDate])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String  @map("invoice_id")
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Decimal @default(1) @db.Decimal(12, 2)
+  unitPrice   Decimal @default(0) @map("unit_price") @db.Decimal(18, 2)
+  amount      Decimal @default(0) @db.Decimal(18, 2)
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  @@map("invoice_items")
+}
+
+// --- Đề xuất / Phê duyệt (Fastwork-style) ---
+model Role {
+  id                String   @id @default(cuid())
+  code              String   @unique
+  name              String
+  description       String?
+  isActive          Boolean  @default(true) @map("is_active")
+  permissions       String[] @default([])
+  canCreateProposal Boolean  @default(false) @map("can_create_proposal")
+  canApprove        Boolean  @default(false) @map("can_approve")
+  sortOrder         Int      @default(0) @map("sort_order")
+  users             User[]
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("roles")
+}
+
+enum ProposalStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  PENDING_PAYMENT
+  PAID
+  REJECTED
+  CANCELLED
+}
+
+enum ProposalGroup {
+  FINANCE
+  PROCUREMENT
+}
+
+enum ParticipantRole {
+  WATCHER
+  NOTIFY
+  EXECUTOR
+}
+
+enum ApprovalStepStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SKIPPED
+}
+
+enum ProposalAttachmentKind {
+  CONTRACT
+  INVOICE
+  CONTENT
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+}
+
+model Department {
+  id              String           @id @default(cuid())
+  name            String           @unique
+  isActive        Boolean          @default(true) @map("is_active")
+  users           User[]
+  userDepartments UserDepartment[]
+  proposals       Proposal[]
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  @@map("departments")
+}
+
+model User {
+  id                    String                        @id @default(cuid())
+  email                 String                        @unique
+  passwordHash          String?                       @map("password_hash")
+  fullName              String                        @map("full_name")
+  roleId                String                        @map("role_id")
+  role                  Role                          @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  isActive              Boolean                       @default(true) @map("is_active")
+  canCreateProposal     Boolean                       @default(false) @map("can_create_proposal")
+  canApprove            Boolean                       @default(false) @map("can_approve")
+  departmentId          String?                       @map("department_id")
+  department            Department?                   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  departmentMemberships UserDepartment[]
+  proposalsCreated      Proposal[]                    @relation("ProposalCreator")
+  workflowSteps         ApprovalWorkflowStep[]
+  approvalActions       ProposalApprovalStep[]
+  participants          ProposalParticipant[]
+  workflowParticipants  ApprovalWorkflowParticipant[] @relation("WorkflowParticipant")
+  createdAt             DateTime                      @default(now()) @map("created_at")
+  updatedAt             DateTime                      @updatedAt @map("updated_at")
+  notifications         Notification[]
+  pushSubscriptions     PushSubscription[]
+
+  @@map("users")
+}
+
+model UserDepartment {
+  userId       String     @map("user_id")
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  departmentId String     @map("department_id")
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  @@id([userId, departmentId])
+  @@index([departmentId])
+  @@map("user_departments")
+}
+
+model ProposalType {
+  id        String             @id @default(cuid())
+  code      String             @unique
+  name      String
+  group     ProposalGroup
+  isActive  Boolean            @default(true) @map("is_active")
+  sortOrder Int                @default(0) @map("sort_order")
+  workflows ApprovalWorkflow[]
+  proposals Proposal[]
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  @@map("proposal_types")
+}
+
+model ApprovalWorkflow {
+  id             String                        @id @default(cuid())
+  name           String
+  proposalTypeId String                        @map("proposal_type_id")
+  proposalType   ProposalType                  @relation(fields: [proposalTypeId], references: [id], onDelete: Cascade)
+  isSequential   Boolean                       @default(true) @map("is_sequential")
+  isActive       Boolean                       @default(true) @map("is_active")
+  steps          ApprovalWorkflowStep[]
+  participants   ApprovalWorkflowParticipant[]
+  proposals      Proposal[]
+  createdAt      DateTime                      @default(now()) @map("created_at")
+  updatedAt      DateTime                      @updatedAt @map("updated_at")
+
+  @@map("approval_workflows")
+}
+
+model ApprovalWorkflowStep {
+  id               String           @id @default(cuid())
+  workflowId       String           @map("workflow_id")
+  workflow         ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  stepOrder        Int              @map("step_order")
+  label            String?
+  approverId       String           @map("approver_id")
+  approver         User             @relation(fields: [approverId], references: [id])
+  isSeniorApprover Boolean          @default(false) @map("is_senior_approver")
+
+  @@unique([workflowId, stepOrder])
+  @@map("approval_workflow_steps")
+}
+
+model ApprovalWorkflowParticipant {
+  id         String           @id @default(cuid())
+  workflowId String           @map("workflow_id")
+  workflow   ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  userId     String           @map("user_id")
+  user       User             @relation("WorkflowParticipant", fields: [userId], references: [id])
+  role       ParticipantRole
+
+  @@unique([workflowId, userId, role])
+  @@map("approval_workflow_participants")
+}
+
+model Proposal {
+  id                 String                 @id @default(cuid())
+  code               String                 @unique
+  title              String
+  status             ProposalStatus         @default(DRAFT)
+  proposalTypeId     String                 @map("proposal_type_id")
+  proposalType       ProposalType           @relation(fields: [proposalTypeId], references: [id])
+  workflowId         String?                @map("workflow_id")
+  workflow           ApprovalWorkflow?      @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  creatorId          String                 @map("creator_id")
+  creator            User                   @relation("ProposalCreator", fields: [creatorId], references: [id])
+  departmentId       String?                @map("department_id")
+  department         Department?            @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  projectName        String?                @map("project_name")
+  content            String?
+  paymentAmount      Decimal?               @map("payment_amount") @db.Decimal(18, 2)
+  paymentContent     String?                @map("payment_content")
+  paymentMethod      PaymentMethod          @default(BANK_TRANSFER) @map("payment_method")
+  cashRecipient      String?                @map("cash_recipient")
+  accountHolder      String?                @map("account_holder")
+  bankName           String?                @map("bank_name")
+  accountNumber      String?                @map("account_number")
+  contractRef        String?                @map("contract_ref")
+  invoiceRef         String?                @map("invoice_ref")
+  desiredDeadline    DateTime?              @map("desired_deadline")
+  regulationDeadline DateTime?              @map("regulation_deadline")
+  cancellationReason String?                @map("cancellation_reason")
+  linkedProposalId   String?                @map("linked_proposal_id")
+  currentStepOrder   Int                    @default(0) @map("current_step_order")
+  participants       ProposalParticipant[]
+  approvalSteps      ProposalApprovalStep[]
+  attachments        ProposalAttachment[]
+  createdAt          DateTime               @default(now()) @map("created_at")
+  lastReminderSentAt DateTime?              @map("last_reminder_sent_at")
+  paidAt             DateTime?              @map("paid_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([creatorId])
+  @@map("proposals")
+}
+
+model ProposalParticipant {
+  id         String          @id @default(cuid())
+  proposalId String          @map("proposal_id")
+  proposal   Proposal        @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  userId     String          @map("user_id")
+  user       User            @relation(fields: [userId], references: [id])
+  role       ParticipantRole
+
+  @@unique([proposalId, userId, role])
+  @@map("proposal_participants")
+}
+
+model ProposalApprovalStep {
+  id         String             @id @default(cuid())
+  proposalId String             @map("proposal_id")
+  proposal   Proposal           @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  stepOrder  Int                @map("step_order")
+  approverId String             @map("approver_id")
+  approver   User               @relation(fields: [approverId], references: [id])
+  status     ApprovalStepStatus @default(PENDING)
+  comment    String?
+  actedAt    DateTime?          @map("acted_at")
+
+  @@unique([proposalId, stepOrder])
+  @@map("proposal_approval_steps")
+}
+
+model ProposalAttachment {
+  id           String                 @id @default(cuid())
+  proposalId   String                 @map("proposal_id")
+  proposal     Proposal               @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  kind         ProposalAttachmentKind
+  originalName String                 @map("original_name")
+  storedName   String                 @map("stored_name")
+  mimeType     String                 @map("mime_type")
+  sizeBytes    Int                    @map("size_bytes")
+  urlPath      String                 @map("url_path")
+  createdAt    DateTime               @default(now()) @map("created_at")
+
+  @@index([proposalId])
+  @@map("proposal_attachments")
+}
+
+enum NotificationType {
+  INFO
+  WARNING
+  ACTION
+  TASK
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String?          @map("user_id")
+  user      User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType @default(INFO)
+  title     String
+  message   String?
+  payload   Json?
+  link      String?
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
