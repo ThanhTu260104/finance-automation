@@ -1,6 +1,7 @@
 export const APP_PERMISSIONS = [
   "dashboard.view",
   "proposal.view",
+  "proposal.view_all",
   "proposal.create",
   "proposal.approve",
   "proposal.pay",
@@ -48,6 +49,11 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         description: "Được mở danh sách và chi tiết đề xuất.",
       },
       {
+        key: "proposal.view_all",
+        label: "Xem tất cả đề xuất",
+        description: "Được xem và xuất Excel đề xuất của tất cả dự án. Nếu không cấp, chỉ xem dữ liệu thuộc dự án của tài khoản.",
+      },
+      {
         key: "proposal.create",
         label: "Tạo đề xuất",
         description: "Được tạo mới, lưu nháp và gửi đề xuất.",
@@ -69,8 +75,8 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     items: [
       {
         key: "department.manage",
-        label: "Quản lý phòng ban",
-        description: "Được vào trang phòng ban và chỉnh sửa danh mục phòng ban.",
+        label: "Quản lý dự án",
+        description: "Được vào trang dự án và chỉnh sửa danh mục dự án.",
       },
       {
         key: "proposal_type.manage",

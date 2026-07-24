@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Post, Body, Patch, Param } from '@nestjs/common';
+import { Controller, Get, Query, Post, Body, Patch, Param, Delete } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ProposalGroup } from '@prisma/client';
 import { ProposalTypesService } from './proposal-types.service';
@@ -31,5 +31,10 @@ export class ProposalTypesController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateProposalTypeDto) {
     return this.proposalTypesService.update(id, dto as any);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.proposalTypesService.remove(id);
   }
 }

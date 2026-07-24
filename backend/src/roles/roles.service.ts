@@ -53,15 +53,6 @@ export class RolesService {
   async update(id: string, dto: UpdateRoleDto) {
     await this.findOne(id);
 
-    if (dto.isActive === false) {
-      const inUse = await this.prisma.user.count({ where: { roleId: id } });
-      if (inUse > 0) {
-        throw new BadRequestException(
-          'Không thể ẩn vai trò đang được gán cho nhân viên',
-        );
-      }
-    }
-
     const permissions =
       dto.permissions !== undefined
         ? normalizeRolePermissions(dto.permissions)
@@ -83,5 +74,18 @@ export class RolesService {
           : {}),
       },
     });
+  }
+
+  async remove(id: string) {
+    const role = await this.prisma.role.findUnique({
+      where: { id },
+      include: { _count: { select: { users: true } } },
+    });
+    if (!role) throw new NotFoundException('Không tìm thấy chức vụ');
+    if (role._count.users > 0) {
+      throw new BadRequestException('Chức vụ đang được gán cho nhân viên. Hãy khóa để giữ lịch sử.');
+    }
+    await this.prisma.role.delete({ where: { id } });
+    return { ok: true };
   }
 }

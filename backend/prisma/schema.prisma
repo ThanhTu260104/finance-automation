@@ -136,6 +136,8 @@ model User {
   email                 String                        @unique
   passwordHash          String?                       @map("password_hash")
   fullName              String                        @map("full_name")
+  phone                 String?
+  avatarUrl             String?                       @map("avatar_url")
   roleId                String                        @map("role_id")
   role                  Role                          @relation(fields: [roleId], references: [id], onDelete: Restrict)
   isActive              Boolean                       @default(true) @map("is_active")
@@ -147,6 +149,7 @@ model User {
   proposalsCreated      Proposal[]                    @relation("ProposalCreator")
   workflowSteps         ApprovalWorkflowStep[]
   approvalActions       ProposalApprovalStep[]
+  proposalComments      ProposalComment[]
   participants          ProposalParticipant[]
   workflowParticipants  ApprovalWorkflowParticipant[] @relation("WorkflowParticipant")
   createdAt             DateTime                      @default(now()) @map("created_at")
@@ -258,6 +261,7 @@ model Proposal {
   participants       ProposalParticipant[]
   approvalSteps      ProposalApprovalStep[]
   attachments        ProposalAttachment[]
+  comments           ProposalComment[]
   createdAt          DateTime               @default(now()) @map("created_at")
   lastReminderSentAt DateTime?              @map("last_reminder_sent_at")
   paidAt             DateTime?              @map("paid_at")
@@ -266,6 +270,21 @@ model Proposal {
   @@index([status])
   @@index([creatorId])
   @@map("proposals")
+}
+
+model ProposalComment {
+  id         String   @id @default(cuid())
+  proposalId String   @map("proposal_id")
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  authorId   String   @map("author_id")
+  author     User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content    String
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([proposalId, createdAt])
+  @@index([authorId])
+  @@map("proposal_comments")
 }
 
 model ProposalParticipant {
@@ -281,15 +300,16 @@ model ProposalParticipant {
 }
 
 model ProposalApprovalStep {
-  id         String             @id @default(cuid())
-  proposalId String             @map("proposal_id")
-  proposal   Proposal           @relation(fields: [proposalId], references: [id], onDelete: Cascade)
-  stepOrder  Int                @map("step_order")
-  approverId String             @map("approver_id")
-  approver   User               @relation(fields: [approverId], references: [id])
-  status     ApprovalStepStatus @default(PENDING)
-  comment    String?
-  actedAt    DateTime?          @map("acted_at")
+  id               String             @id @default(cuid())
+  proposalId       String             @map("proposal_id")
+  proposal         Proposal           @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  stepOrder        Int                @map("step_order")
+  approverId       String             @map("approver_id")
+  approver         User               @relation(fields: [approverId], references: [id])
+  status           ApprovalStepStatus @default(PENDING)
+  comment          String?
+  actedAt          DateTime?          @map("acted_at")
+  isSeniorApprover Boolean            @default(false) @map("is_senior_approver")
 
   @@unique([proposalId, stepOrder])
   @@map("proposal_approval_steps")

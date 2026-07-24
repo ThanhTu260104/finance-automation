@@ -96,6 +96,11 @@ export async function updateProposalType(id: string, payload: Partial<ProposalTy
   return data;
 }
 
+export async function deleteProposalType(id: string): Promise<void> {
+  await api.delete(`/proposal-types/${id}`);
+  clearProposalTypesCache();
+}
+
 export async function getWorkflows(): Promise<ApprovalWorkflow[]> {
   const { data } = await api.get<ApprovalWorkflow[]>("/workflows");
   return data;

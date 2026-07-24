@@ -36,7 +36,7 @@ const proposalInclude = {
       steps: {
         orderBy: { stepOrder: 'asc' as const },
         include: {
-          approver: { select: { id: true, fullName: true } },
+          approver: { select: { id: true, fullName: true, avatarUrl: true } },
         },
       },
       participants: {
@@ -50,7 +50,7 @@ const proposalInclude = {
   approvalSteps: {
     orderBy: { stepOrder: 'asc' as const },
     include: {
-      approver: { select: { id: true, fullName: true, email: true } },
+      approver: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
     },
   },
   attachments: {
@@ -87,6 +87,7 @@ const proposalListInclude = {
       status: true,
       comment: true,
       actedAt: true,
+      isSeniorApprover: true,
     },
   },
 } satisfies Prisma.ProposalInclude;
@@ -106,7 +107,7 @@ function isSeniorWorkflowStep(
 }
 
 function getInitialApproverIds(proposal: {
-  approvalSteps: Array<{ approverId: string; status: ApprovalStepStatus; stepOrder: number }>;
+  approvalSteps: Array<{ approverId: string; status: ApprovalStepStatus; stepOrder: number; isSeniorApprover: boolean }>;
   workflow?: { isSequential?: boolean; steps: { stepOrder: number; isSeniorApprover: boolean }[] } | null;
   currentStepOrder: number;
 }) {
@@ -118,7 +119,7 @@ function getInitialApproverIds(proposal: {
           !proposal.workflow?.isSequential
             ? true
             : s.stepOrder === proposal.currentStepOrder ||
-              isSeniorWorkflowStep(proposal.workflow, s.stepOrder),
+              s.isSeniorApprover,
         )
         .map((s) => s.approverId)
         .filter(Boolean),
@@ -138,6 +139,81 @@ export class ProposalsService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  private async getCommentContext(proposalId: string, userId: string) {
+    const proposal = await this.prisma.proposal.findUnique({
+      where: { id: proposalId },
+      select: {
+        id: true,
+        title: true,
+        creatorId: true,
+        approvalSteps: { select: { approverId: true } },
+        participants: { select: { userId: true } },
+        comments: { select: { authorId: true } },
+      },
+    });
+    if (!proposal) throw new NotFoundException('Không tìm thấy đề xuất');
+
+    const memberIds = new Set([
+      proposal.creatorId,
+      ...proposal.approvalSteps.map((step) => step.approverId),
+      ...proposal.participants.map((participant) => participant.userId),
+    ]);
+    if (!memberIds.has(userId)) {
+      throw new ForbiddenException('Bạn không thuộc luồng trao đổi của đề xuất này');
+    }
+    return { proposal, memberIds };
+  }
+
+  async getComments(id: string, rawUserId: string) {
+    const userId = this.userContext.requireUserId(rawUserId);
+    await this.getCommentContext(id, userId);
+    return this.prisma.proposalComment.findMany({
+      where: { proposalId: id },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        author: {
+          select: { id: true, fullName: true, email: true, avatarUrl: true },
+        },
+      },
+    });
+  }
+
+  async addComment(id: string, rawUserId: string, content: string) {
+    const userId = this.userContext.requireUserId(rawUserId);
+    const { proposal, memberIds } = await this.getCommentContext(id, userId);
+    const author = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, fullName: true, isActive: true },
+    });
+    if (!author?.isActive) throw new ForbiddenException('Tài khoản không hoạt động');
+
+    const comment = await this.prisma.proposalComment.create({
+      data: { proposalId: id, authorId: userId, content },
+      include: {
+        author: {
+          select: { id: true, fullName: true, email: true, avatarUrl: true },
+        },
+      },
+    });
+
+    proposal.comments.forEach((item) => memberIds.add(item.authorId));
+    memberIds.delete(userId);
+    const preview = content.length > 140 ? `${content.slice(0, 137)}...` : content;
+    await Promise.all(
+      Array.from(memberIds).map((recipientId) =>
+        this.notifications.create(undefined, {
+          userId: recipientId,
+          type: NotificationType.INFO,
+          title: 'Ý kiến mới về đề xuất',
+          message: `${author.fullName}: ${preview}`,
+          link: `/proposals/${id}`,
+          payload: { proposalId: id, commentId: comment.id },
+        }),
+      ),
+    );
+    return comment;
+  }
+
   private getUserDepartmentIds(user: {
     departmentId?: string | null;
     departmentMemberships?: Array<{ departmentId: string | null }>;
@@ -153,6 +229,37 @@ export class ProposalsService {
     );
   }
 
+  private async getProposalAccessScope(
+    userId: string,
+  ): Promise<Prisma.ProposalWhereInput> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        departmentId: true,
+        departmentMemberships: { select: { departmentId: true } },
+        role: { select: { permissions: true } },
+      },
+    });
+    if (!user || !roleHasPermission(user.role.permissions, 'proposal.view')) {
+      throw new ForbiddenException('Bạn không có quyền xem đề xuất');
+    }
+    if (roleHasPermission(user.role.permissions, 'proposal.view_all')) {
+      return {};
+    }
+
+    const departmentIds = this.getUserDepartmentIds(user);
+    if (departmentIds.length > 0) {
+      return { departmentId: { in: departmentIds } };
+    }
+    return {
+      OR: [
+        { creatorId: userId },
+        { approvalSteps: { some: { approverId: userId } } },
+        { participants: { some: { userId } } },
+      ],
+    };
+  }
+
   private resolveProposalDepartmentId(
     user: {
       departmentId?: string | null;
@@ -162,12 +269,12 @@ export class ProposalsService {
   ) {
     const allowedDepartmentIds = this.getUserDepartmentIds(user);
     if (allowedDepartmentIds.length === 0) {
-      throw new BadRequestException('Tài khoản chưa được gán phòng ban');
+      throw new BadRequestException('Tài khoản chưa được gán dự án');
     }
 
     if (requestedDepartmentId) {
       if (!allowedDepartmentIds.includes(requestedDepartmentId)) {
-        throw new ForbiddenException('Bạn không thuộc phòng ban này');
+        throw new ForbiddenException('Bạn không thuộc dự án này');
       }
       return requestedDepartmentId;
     }
@@ -176,7 +283,7 @@ export class ProposalsService {
       return allowedDepartmentIds[0];
     }
 
-    throw new BadRequestException('Vui lòng chọn phòng ban');
+    throw new BadRequestException('Vui lòng chọn dự án');
   }
 
   private assertReadyForSubmit(data: {
@@ -195,7 +302,7 @@ export class ProposalsService {
     const missing: string[] = [];
 
     if (isBlank(data.proposalTypeId)) missing.push('loại đề xuất');
-    if (isBlank(data.departmentId)) missing.push('phòng ban');
+    if (isBlank(data.departmentId)) missing.push('dự án');
     if (isBlank(data.title)) missing.push('tên đề xuất');
     if (isBlank(data.paymentContent)) missing.push('nội dung thanh toán');
     if (data.paymentAmount === null || data.paymentAmount === undefined) {
@@ -265,6 +372,7 @@ export class ProposalsService {
 
   async findAll(rawUserId: string, query: ProposalQueryDto) {
     const userId = this.userContext.requireUserId(rawUserId);
+    const accessScope = await this.getProposalAccessScope(userId);
     const view = query.view ?? ProposalViewFilter.ALL;
     let where: Prisma.ProposalWhereInput = {};
 
@@ -319,6 +427,7 @@ export class ProposalsService {
       default:
         where = {};
     }
+    where = { AND: [accessScope, where] };
 
     const isSeparatedStatusView =
       view === ProposalViewFilter.DRAFT ||
@@ -527,16 +636,25 @@ export class ProposalsService {
           (s) => s.approverId === userId && s.status === ApprovalStepStatus.PENDING,
         );
       });
+
+      return limit ? filteredRows.slice(skip, skip + limit) : filteredRows;
     }
 
     return rows;
   }
 
-  async getProjects() {
+  async getProjects(rawUserId: string) {
+    const userId = this.userContext.requireUserId(rawUserId);
+    const accessScope = await this.getProposalAccessScope(userId);
     const rows = await this.prisma.proposal.findMany({
       where: {
-        projectName: { not: null },
-        status: { notIn: [ProposalStatus.DRAFT, ProposalStatus.CANCELLED] },
+        AND: [
+          accessScope,
+          {
+            projectName: { not: null },
+            status: { notIn: [ProposalStatus.DRAFT, ProposalStatus.CANCELLED] },
+          },
+        ],
       },
       select: { projectName: true },
       distinct: ['projectName'],
@@ -549,13 +667,18 @@ export class ProposalsService {
   }
 
   async findOne(id: string, rawUserId?: string) {
-    const proposal = await this.prisma.proposal.findUnique({
-      where: { id },
+    const userId = rawUserId
+      ? this.userContext.requireUserId(rawUserId)
+      : undefined;
+    const accessScope = userId
+      ? await this.getProposalAccessScope(userId)
+      : {};
+    const proposal = await this.prisma.proposal.findFirst({
+      where: { AND: [{ id }, accessScope] },
       include: proposalInclude,
     });
     if (!proposal) throw new NotFoundException('Không tìm thấy đề xuất');
-    if (rawUserId) {
-      const userId = this.userContext.requireUserId(rawUserId);
+    if (userId) {
       if (
         (proposal.status === ProposalStatus.DRAFT ||
           proposal.status === ProposalStatus.CANCELLED) &&
@@ -612,7 +735,6 @@ export class ProposalsService {
         userId: p.userId,
         role: p.role,
       })) ?? [];
-
     const proposal = await this.prisma.proposal.create({
       data: {
         code,
@@ -649,10 +771,8 @@ export class ProposalsService {
                 create: workflow.steps.map((s) => ({
                   stepOrder: s.stepOrder,
                   approverId: s.approverId,
-                  status:
-                    s.stepOrder === 1
-                      ? ApprovalStepStatus.PENDING
-                      : ApprovalStepStatus.PENDING,
+                  isSeniorApprover: s.isSeniorApprover,
+                  status: ApprovalStepStatus.PENDING,
                 })),
               },
             }
@@ -803,7 +923,6 @@ export class ProposalsService {
     await this.prisma.proposalApprovalStep.deleteMany({
       where: { proposalId: id },
     });
-
     const updated = await this.prisma.proposal.update({
       where: { id },
       data: {
@@ -814,6 +933,7 @@ export class ProposalsService {
           create: workflow.steps.map((s) => ({
             stepOrder: s.stepOrder,
             approverId: s.approverId,
+            isSeniorApprover: s.isSeniorApprover,
             status: ApprovalStepStatus.PENDING,
           })),
         },
@@ -837,8 +957,8 @@ export class ProposalsService {
         this.notifications.create(undefined, {
           userId: approverId,
           type: 'ACTION',
-          title: 'Yêu cầu duyệt đề xuất',
-          message: `Đề xuất "${proposal.title}" cần duyệt`,
+          title: 'Đề xuất mới cần duyệt',
+          message: `Đề xuất "${proposal.title}" vừa được gửi và đang chờ bạn duyệt.`,
           link: `/proposals/${proposal.id}`,
           payload: { proposalId: proposal.id },
         }),
@@ -883,7 +1003,7 @@ export class ProposalsService {
       throw new ForbiddenException('Bạn không phải người duyệt hiện tại');
     }
 
-    const isSenior = isSeniorWorkflowStep(proposal.workflow, step.stepOrder);
+    const isSenior = step.isSeniorApprover;
 
     // If workflow is sequential, enforce ordering. Senior approvers may act anytime.
     if (
@@ -962,7 +1082,7 @@ export class ProposalsService {
             (s) =>
               s.status === ApprovalStepStatus.PENDING &&
               (s.stepOrder === nextStep.stepOrder ||
-                isSeniorWorkflowStep(proposal.workflow, s.stepOrder)),
+                s.isSeniorApprover),
           )
           .map((s) => s.approverId)
           .filter(Boolean);
@@ -985,7 +1105,6 @@ export class ProposalsService {
         include: proposalInclude,
       });
 
-      return limit ? filteredRows.slice(skip, skip + limit) : filteredRows;
     }
 
     if (!updatedProposal) updatedProposal = await this.findOne(id);
@@ -1080,7 +1199,7 @@ export class ProposalsService {
       throw new ForbiddenException('Bạn không thể từ chối đề xuất này');
     }
 
-    const isSenior = isSeniorWorkflowStep(proposal.workflow, step.stepOrder);
+    const isSenior = step.isSeniorApprover;
 
     if (
       proposal.workflow?.isSequential &&

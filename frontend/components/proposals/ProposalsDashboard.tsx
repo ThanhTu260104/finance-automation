@@ -62,7 +62,7 @@ type ExportFilters = {
 };
 
 type DepartmentExportSummary = {
-  "Phòng ban": string;
+  "Dự án": string;
   "Tổng đề xuất": number;
   "Chờ duyệt": number;
   "Đã duyệt": number;
@@ -154,6 +154,10 @@ export function ProposalsDashboard({
     currentUser?.role?.permissions,
     "proposal.create",
   );
+  const canViewAllProposals = hasPermission(
+    currentUser?.role?.permissions,
+    "proposal.view_all",
+  );
   const [view, setView] = useState<ProposalView>(initialView);
   const [stats, setStats] = useState<ProposalStats | null>(null);
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -207,9 +211,35 @@ export function ProposalsDashboard({
     ])
       .then(([proposalTypes, departmentRows, userRows, statRows]) => {
         if (cancelled) return;
+        const assignedDepartmentIds = new Set(
+          (
+            currentUser.departments?.length
+              ? currentUser.departments
+              : currentUser.department
+                ? [currentUser.department]
+                : []
+          ).map((department) => department.id),
+        );
+        const visibleDepartments = canViewAllProposals
+          ? departmentRows
+          : departmentRows.filter((department) =>
+              assignedDepartmentIds.has(department.id),
+            );
+        const visibleUsers = canViewAllProposals
+          ? userRows
+          : userRows.filter((user) => {
+              const userDepartments = user.departments?.length
+                ? user.departments
+                : user.department
+                  ? [user.department]
+                  : [];
+              return userDepartments.some((department) =>
+                assignedDepartmentIds.has(department.id),
+              );
+            });
         setTypes(proposalTypes);
-        setDepartments(departmentRows);
-        setUsers(userRows);
+        setDepartments(visibleDepartments);
+        setUsers(visibleUsers);
         setStats(statRows);
         setError(null);
       })
@@ -224,7 +254,7 @@ export function ProposalsDashboard({
     return () => {
       cancelled = true;
     };
-  }, [currentUser?.id, userLoading]);
+  }, [canViewAllProposals, currentUser, userLoading]);
 
   const effectiveDisplayedStatus =
     statusFilter === "DRAFT" || statusFilter === "CANCELLED"
@@ -361,6 +391,16 @@ export function ProposalsDashboard({
     return () => clearTimeout(timer);
   }, [loadProposals]);
 
+  useEffect(() => {
+    const refresh = () => void loadProposals();
+    window.addEventListener("finance:proposal-change", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("finance:proposal-change", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [loadProposals]);
+
   const loadMoreProposals = useCallback(async () => {
     if (
       loading ||
@@ -399,7 +439,7 @@ export function ProposalsDashboard({
       setError(
         err instanceof Error
           ? err.message
-          : "KhÃ´ng thá»ƒ táº£i thÃªm danh sÃ¡ch Ä‘á» xuáº¥t",
+          : "Không thể tải thêm danh sách đề xuất",
       );
     } finally {
       loadingMoreRef.current = false;
@@ -563,7 +603,7 @@ export function ProposalsDashboard({
         { "Chỉ tiêu": "Từ ngày", "Giá trị": exportFilters.dateFrom || "Tất cả" },
         { "Chỉ tiêu": "Đến ngày", "Giá trị": exportFilters.dateTo || "Tất cả" },
         {
-          "Chỉ tiêu": "Phòng ban",
+          "Chỉ tiêu": "Dự án",
           "Giá trị": optionName(departments, exportFilters.departmentId),
         },
         {
@@ -614,7 +654,7 @@ export function ProposalsDashboard({
         "Người đề xuất": proposal.creator.fullName,
         Email: proposal.creator.email,
         "Người thực hiện": getExecutorNames(proposal),
-        "Phòng ban": proposal.department?.name ?? "",
+        "Dự án": proposal.department?.name ?? "",
         "Loại đề xuất": proposal.proposalType.name,
         "Ngày đề xuất": formatDateTime(proposal.createdAt),
         "Thời gian duyệt cuối": formatDateTime(
@@ -634,11 +674,11 @@ export function ProposalsDashboard({
       const departmentRows = Array.from(
         rows.reduce(
           (map, proposal) => {
-            const departmentName = proposal.department?.name ?? "Chưa có phòng ban";
+            const departmentName = proposal.department?.name ?? "Chưa có dự án";
             const current =
               map.get(departmentName) ??
               {
-                "Phòng ban": departmentName,
+                "Dự án": departmentName,
                 "Tổng đề xuất": 0,
                 "Chờ duyệt": 0,
                 "Đã duyệt": 0,
@@ -856,11 +896,11 @@ export function ProposalsDashboard({
               </CompactSelect>
 
               <CompactSelect
-                label="Phòng ban"
+                label="Dự án"
                 value={departmentFilter}
                 onChange={setDepartmentFilter}
               >
-                <option value="">Tất cả phòng ban</option>
+                <option value="">Tất cả dự án</option>
                 {departments.map((department) => (
                   <option key={department.id} value={department.id}>
                     {department.name}
@@ -953,7 +993,7 @@ export function ProposalsDashboard({
             </div>
             <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-3 text-sm">
               <div className="flex justify-between gap-3"><span className="text-slate-500">Người đề xuất</span><span className="truncate text-right font-medium text-slate-700">{proposal.creator.fullName}</span></div>
-              <div className="flex justify-between gap-3"><span className="text-slate-500">Phòng ban</span><span className="truncate text-right text-slate-700">{proposal.department?.name || '-'}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-slate-500">Dự án</span><span className="truncate text-right text-slate-700">{proposal.department?.name || '-'}</span></div>
               <div className="flex justify-between gap-3"><span className="text-slate-500">Số tiền</span><span className="font-semibold text-slate-900">{proposal.paymentAmount ? formatCurrency(Number(proposal.paymentAmount)) : '—'}</span></div>
             </div>
           </Link>
@@ -967,7 +1007,7 @@ export function ProposalsDashboard({
               <th className="px-4 py-3 font-medium">#</th>
               <th className="px-4 py-3 font-medium">Tên đề xuất</th>
               <th className="px-4 py-3 font-medium">Người đề xuất</th>
-              <th className="px-4 py-3 font-medium">Phòng ban</th>
+              <th className="px-4 py-3 font-medium">Dự án</th>
               <th className="px-4 py-3 font-medium">Loại</th>
               <th className="px-4 py-3 font-medium">Ngày đề xuất</th>
               <th className="px-4 py-3 text-right font-medium">Số tiền</th>
@@ -1063,10 +1103,10 @@ export function ProposalsDashboard({
         {loadingMore ? (
           <span className="inline-flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
-            Äang táº£i thÃªm Ä‘á» xuáº¥t...
+            Đang tải thêm đề xuất...
           </span>
         ) : !loading && proposals.length > 0 && !hasMore ? (
-          <span>ÄÃ£ hiá»ƒn thá»‹ táº¥t cáº£ Ä‘á» xuáº¥t</span>
+          <span>Đã hiển thị tất cả đề xuất</span>
         ) : null}
       </div>
 
@@ -1079,7 +1119,7 @@ export function ProposalsDashboard({
                   Xuất Excel đề xuất
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  File gồm 3 sheet: Tổng quan, Chi tiết đề xuất, Chi phí phòng ban.
+                  File gồm 3 sheet: Tổng quan, Chi tiết đề xuất, Chi phí dự án.
                 </p>
               </div>
               <button
@@ -1110,13 +1150,13 @@ export function ProposalsDashboard({
                 }
               />
               <CompactSelect
-                label="Phòng ban"
+                label="Dự án"
                 value={exportFilters.departmentId}
                 onChange={(value) =>
                   setExportFilters((prev) => ({ ...prev, departmentId: value }))
                 }
               >
-                <option value="">Tất cả phòng ban</option>
+                <option value="">Tất cả dự án</option>
                 {departments.map((department) => (
                   <option key={department.id} value={department.id}>
                     {department.name}

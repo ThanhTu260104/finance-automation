@@ -9,6 +9,10 @@ import {
 } from "@/lib/api/attachments";
 import type { LocalFileItem } from "@/components/proposals/ProposalFileUpload";
 import { canPreviewSpreadsheet, ExcelPreview } from "@/components/proposals/ExcelPreview";
+import {
+  canPreviewDocx,
+  DocxPreview,
+} from "@/components/proposals/DocxPreview";
 import { cn } from "@/lib/utils/cn";
 
 const KIND_LABELS: Record<string, string> = {
@@ -65,23 +69,23 @@ export function ProposalFileReview({
   }, [localFiles, attachments]);
 
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [excelModalId, setExcelModalId] = useState<string | null>(null);
+  const [previewModalId, setPreviewModalId] = useState<string | null>(null);
   const active = items.find((i) => i.id === activeId) ?? items[0] ?? null;
-  const excelModalItem = items.find((item) => item.id === excelModalId) ?? null;
+  const previewModalItem = items.find((item) => item.id === previewModalId) ?? null;
 
   useEffect(() => {
-    if (!excelModalItem) return;
+    if (!previewModalItem) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setExcelModalId(null);
+      if (event.key === "Escape") setPreviewModalId(null);
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [excelModalItem]);
+  }, [previewModalItem]);
 
   if (items.length === 0) {
     return (
@@ -118,25 +122,22 @@ export function ProposalFileReview({
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-border p-3">
+      <div className="flex gap-2 overflow-x-auto border-b border-border p-3">
         {items.map((item) => (
           <button
             key={item.id}
             type="button"
             onClick={() => {
               setActiveId(item.id);
-              if (canPreviewSpreadsheet(item.mimeType, item.name)) {
-                setExcelModalId(item.id);
-              }
             }}
             className={cn(
-              "rounded-xl border px-3 py-2 text-left text-xs transition",
+              "min-w-0 max-w-[78vw] flex-none rounded-xl border px-3 py-2 text-left text-xs transition sm:max-w-xs",
               active?.id === item.id
                 ? "border-primary-500 bg-primary-50 text-primary-800"
                 : "border-border bg-surface text-slate-600 hover:bg-surface-muted",
             )}
           >
-            <span className="block font-medium">{item.name}</span>
+            <span className="block truncate font-medium">{item.name}</span>
             <span className="text-slate-400">
               {KIND_LABELS[item.kind] ?? item.kind}
             </span>
@@ -145,10 +146,10 @@ export function ProposalFileReview({
       </div>
 
       {active && (
-        <div className="p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div>
-              <p className="font-medium text-slate-800">{active.name}</p>
+        <div className="p-2 sm:p-4">
+          <div className="mb-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="break-all font-medium text-slate-800">{active.name}</p>
               <p className="text-xs text-slate-500">
                 {KIND_LABELS[active.kind] ?? active.kind}
               </p>
@@ -157,14 +158,27 @@ export function ProposalFileReview({
               href={active.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-surface-muted"
+              className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-slate-600 hover:bg-surface-muted sm:w-auto sm:py-1.5"
             >
               <Download className="h-3.5 w-3.5" />
               Mở / Tải
             </a>
           </div>
 
-          <div className="min-h-[480px] overflow-hidden rounded-xl border border-border bg-slate-100">
+          <div className="relative min-h-[320px] overflow-hidden rounded-xl border border-border bg-slate-100 sm:min-h-[480px]">
+            {(isImage(active.mimeType) ||
+              isPdf(active.mimeType) ||
+              canPreviewDocx(active.mimeType, active.name) ||
+              canPreviewSpreadsheet(active.mimeType, active.name)) && (
+              <button
+                type="button"
+                onClick={() => setPreviewModalId(active.id)}
+                className="absolute right-2 top-2 z-20 inline-flex items-center gap-1.5 rounded-lg bg-slate-900/85 px-3 py-2 text-xs font-medium text-white shadow hover:bg-slate-900 sm:right-3 sm:top-3"
+              >
+                <Maximize2 className="h-4 w-4" />
+                Toàn màn hình
+              </button>
+            )}
             {isImage(active.mimeType) ? (
               <div className="flex h-[min(70vh,560px)] items-center justify-center p-4">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -180,16 +194,13 @@ export function ProposalFileReview({
                 src={active.url}
                 className="h-[min(70vh,560px)] w-full bg-white"
               />
+            ) : canPreviewDocx(active.mimeType, active.name) ? (
+              <DocxPreview
+                url={active.url}
+                file={active.file}
+              />
             ) : canPreviewSpreadsheet(active.mimeType, active.name) ? (
               <div className="relative h-[min(70vh,560px)]">
-                <button
-                  type="button"
-                  onClick={() => setExcelModalId(active.id)}
-                  className="absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-lg bg-slate-900/85 px-3 py-2 text-xs font-medium text-white shadow hover:bg-slate-900"
-                >
-                  <Maximize2 className="h-4 w-4" />
-                  Xem toàn màn hình
-                </button>
                 <ExcelPreview
                   url={active.url}
                   file={active.file}
@@ -216,48 +227,73 @@ export function ProposalFileReview({
         </div>
       )}
 
-      {excelModalItem && typeof document !== "undefined"
+      {previewModalItem && typeof document !== "undefined"
         ? createPortal(
             <div
               className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-2 backdrop-blur-sm sm:p-5"
               role="dialog"
               aria-modal="true"
-              aria-label={`Xem trước ${excelModalItem.name}`}
+              aria-label={`Xem trước ${previewModalItem.name}`}
               onMouseDown={(event) => {
-                if (event.target === event.currentTarget) setExcelModalId(null);
+                if (event.target === event.currentTarget) setPreviewModalId(null);
               }}
             >
-              <div className="flex h-[96vh] w-[98vw] max-w-[1800px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:h-[94vh] sm:w-[96vw]">
-                <div className="flex flex-none items-center justify-between gap-4 border-b border-slate-200 px-4 py-3 sm:px-5">
+              <div className="flex h-[98dvh] w-[100vw] max-w-[1800px] flex-col overflow-hidden bg-white shadow-2xl sm:h-[94vh] sm:w-[96vw] sm:rounded-2xl">
+                <div className="flex flex-none flex-col gap-2 border-b border-slate-200 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 sm:py-3">
                   <div className="min-w-0">
-                    <p className="truncate font-semibold text-slate-800">{excelModalItem.name}</p>
-                    <p className="text-xs text-slate-500">Xem trước file Excel</p>
+                    <p className="truncate font-semibold text-slate-800">{previewModalItem.name}</p>
+                    <p className="text-xs text-slate-500">Xem tài liệu toàn màn hình</p>
                   </div>
-                  <div className="flex flex-none items-center gap-2">
+                  <div className="grid flex-none grid-cols-2 gap-2 sm:flex sm:items-center">
                     <a
-                      href={excelModalItem.url}
+                      href={previewModalItem.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
                     >
                       <Download className="h-4 w-4" />
                       Tải file
                     </a>
                     <button
                       type="button"
-                      onClick={() => setExcelModalId(null)}
-                      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                      onClick={() => setPreviewModalId(null)}
+                      className="inline-flex items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
                       aria-label="Đóng xem trước"
                     >
                       <X className="h-5 w-5" />
                     </button>
                   </div>
                 </div>
-                <ExcelPreview
-                  url={excelModalItem.url}
-                  file={excelModalItem.file}
-                  className="min-h-0 flex-1"
-                />
+                <div className="min-h-0 flex-1 overflow-hidden bg-slate-100">
+                  {isImage(previewModalItem.mimeType) ? (
+                    <div className="flex h-full items-center justify-center overflow-auto p-3 sm:p-6">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={previewModalItem.url}
+                        alt={previewModalItem.name}
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    </div>
+                  ) : isPdf(previewModalItem.mimeType) ? (
+                    <iframe
+                      title={previewModalItem.name}
+                      src={previewModalItem.url}
+                      className="h-full w-full bg-white"
+                    />
+                  ) : canPreviewDocx(previewModalItem.mimeType, previewModalItem.name) ? (
+                    <DocxPreview
+                      url={previewModalItem.url}
+                      file={previewModalItem.file}
+                      className="!h-full"
+                    />
+                  ) : (
+                    <ExcelPreview
+                      url={previewModalItem.url}
+                      file={previewModalItem.file}
+                      className="h-full"
+                    />
+                  )}
+                </div>
               </div>
             </div>,
             document.body,

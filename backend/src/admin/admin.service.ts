@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { ApprovalStepStatus, Prisma, ProposalStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { roleHasPermission } from '../roles/role-permissions';
 import { DashboardSummaryDto } from './dto/dashboard-summary.dto';
 
-type ReportPeriod = 'week' | 'month';
+type ReportPeriod = 'day' | 'week' | 'month';
 
 type PeriodQuery = {
   period?: string;
@@ -20,9 +21,69 @@ const APPROVED_STATUSES = [
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async getProposalAccess(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        departmentId: true,
+        departmentMemberships: { select: { departmentId: true } },
+        role: { select: { permissions: true } },
+      },
+    });
+    if (!user || !roleHasPermission(user.role.permissions, 'proposal.view')) {
+      throw new ForbiddenException('Bạn không có quyền xem dữ liệu đề xuất');
+    }
+    if (roleHasPermission(user.role.permissions, 'proposal.view_all')) {
+      return {
+        proposalWhere: {} satisfies Prisma.ProposalWhereInput,
+        departmentWhere: { isActive: true } satisfies Prisma.DepartmentWhereInput,
+      };
+    }
+    const departmentIds = Array.from(
+      new Set(
+        [
+          ...user.departmentMemberships.map((item) => item.departmentId),
+          user.departmentId,
+        ].filter(Boolean) as string[],
+      ),
+    );
+    const proposalWhere: Prisma.ProposalWhereInput = departmentIds.length
+      ? { departmentId: { in: departmentIds } }
+      : {
+          OR: [
+            { creatorId: userId },
+            { approvalSteps: { some: { approverId: userId } } },
+            { participants: { some: { userId } } },
+          ],
+        };
+    return {
+      proposalWhere,
+      departmentWhere: {
+        isActive: true,
+        id: { in: departmentIds },
+      } satisfies Prisma.DepartmentWhereInput,
+    };
+  }
+
   private getPeriodRange(query: PeriodQuery = {}) {
-    const period: ReportPeriod = query.period === 'week' ? 'week' : 'month';
+    const period: ReportPeriod =
+      query.period === 'day'
+        ? 'day'
+        : query.period === 'week'
+          ? 'week'
+          : 'month';
     const now = new Date();
+
+    if (period === 'day') {
+      const start = query.date ? new Date(query.date) : new Date(now);
+      if (Number.isNaN(start.getTime())) {
+        start.setTime(now.getTime());
+      }
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 1);
+      return { period, start, end };
+    }
 
     if (period === 'week') {
       const anchor = query.date ? new Date(query.date) : now;
@@ -69,8 +130,15 @@ export class AdminService {
     };
   }
 
-  async getDashboardSummary(query: PeriodQuery = {}): Promise<DashboardSummaryDto> {
+  async getDashboardSummary(
+    userId: string,
+    query: PeriodQuery = {},
+  ): Promise<DashboardSummaryDto> {
+    const { proposalWhere } = await this.getProposalAccess(userId);
     const { range, where: periodWhere } = this.createdInPeriod(query);
+    const scopedPeriodWhere: Prisma.ProposalWhereInput = {
+      AND: [proposalWhere, periodWhere],
+    };
 
     const [
       totalProposals,
@@ -81,22 +149,22 @@ export class AdminService {
     ] = await Promise.all([
       this.prisma.proposal.count({
         where: {
-          ...periodWhere,
+          AND: [scopedPeriodWhere],
           status: { notIn: [ProposalStatus.DRAFT, ProposalStatus.CANCELLED] },
         },
       }),
       this.prisma.proposal.count({
-        where: { ...periodWhere, status: ProposalStatus.PENDING },
+        where: { AND: [scopedPeriodWhere], status: ProposalStatus.PENDING },
       }),
       this.prisma.proposal.count({
         where: {
-          ...periodWhere,
+          AND: [scopedPeriodWhere],
           status: { in: APPROVED_STATUSES },
         },
       }),
       this.prisma.proposal.aggregate({
         where: {
-          ...periodWhere,
+          AND: [scopedPeriodWhere],
           status: { in: APPROVED_STATUSES },
           paymentAmount: { not: null },
         },
@@ -118,11 +186,12 @@ export class AdminService {
     };
   }
 
-  async getRecentProposals(query: PeriodQuery = {}) {
+  async getRecentProposals(userId: string, query: PeriodQuery = {}) {
+    const { proposalWhere } = await this.getProposalAccess(userId);
     const { where: periodWhere } = this.createdInPeriod(query);
     return this.prisma.proposal.findMany({
       where: {
-        ...periodWhere,
+        AND: [proposalWhere, periodWhere],
         status: {
           notIn: [ProposalStatus.DRAFT, ProposalStatus.CANCELLED],
         },
@@ -167,24 +236,30 @@ export class AdminService {
     );
   }
 
-  async getReportDepartments() {
+  async getReportDepartments(userId: string) {
+    const { departmentWhere } = await this.getProposalAccess(userId);
     return this.prisma.department.findMany({
-      where: { isActive: true },
+      where: departmentWhere,
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     });
   }
 
-  async getDepartmentReport(query: PeriodQuery & { departmentId?: string }) {
+  async getDepartmentReport(
+    userId: string,
+    query: PeriodQuery & { departmentId?: string },
+  ) {
+    const { proposalWhere } = await this.getProposalAccess(userId);
     const { range, where: periodWhere } = this.createdInPeriod(query);
     const baseWhere: Prisma.ProposalWhereInput = {
-      ...periodWhere,
+      AND: [proposalWhere, periodWhere],
       status: { notIn: [ProposalStatus.DRAFT, ProposalStatus.CANCELLED] },
       ...(query.departmentId ? { departmentId: query.departmentId } : {}),
     };
 
     const chartYear = range.start.getFullYear();
     const monthlyWhere: Prisma.ProposalWhereInput = {
+      AND: [proposalWhere],
       status: ProposalStatus.PAID,
       paymentAmount: { not: null },
       createdAt: {

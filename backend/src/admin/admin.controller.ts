@@ -12,18 +12,20 @@ export class AdminController {
   @Get('dashboard')
   @ApiOkResponse({ type: DashboardSummaryDto })
   getDashboard(
+    @CurrentUserId() userId: string,
     @Query('period') period?: string,
     @Query('date') date?: string,
   ): Promise<DashboardSummaryDto> {
-    return this.adminService.getDashboardSummary({ period, date });
+    return this.adminService.getDashboardSummary(userId, { period, date });
   }
 
   @Get('recent-proposals')
   getRecentProposals(
+    @CurrentUserId() userId: string,
     @Query('period') period?: string,
     @Query('date') date?: string,
   ) {
-    return this.adminService.getRecentProposals({ period, date });
+    return this.adminService.getRecentProposals(userId, { period, date });
   }
 
   @Get('pending-approvals')
@@ -40,16 +42,21 @@ export class AdminController {
   }
 
   @Get('report-departments')
-  getReportDepartments() {
-    return this.adminService.getReportDepartments();
+  getReportDepartments(@CurrentUserId() userId: string) {
+    return this.adminService.getReportDepartments(userId);
   }
 
   @Get('department-report')
   getDepartmentReport(
+    @CurrentUserId() userId: string,
     @Query('departmentId') departmentId?: string,
     @Query('period') period?: string,
     @Query('date') date?: string,
   ) {
-    return this.adminService.getDepartmentReport({ departmentId, period, date });
+    return this.adminService.getDepartmentReport(userId, {
+      departmentId,
+      period,
+      date,
+    });
   }
 }

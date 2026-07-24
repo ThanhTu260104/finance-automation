@@ -117,6 +117,7 @@ export class NotificationsScheduler implements OnModuleInit, OnModuleDestroy {
       approverId: string;
       status: ApprovalStepStatus;
       stepOrder: number;
+      isSeniorApprover: boolean;
     }>;
     workflow?: {
       isSequential: boolean;
@@ -132,7 +133,7 @@ export class NotificationsScheduler implements OnModuleInit, OnModuleDestroy {
             !proposal.workflow?.isSequential
               ? true
               : step.stepOrder === proposal.currentStepOrder ||
-                this.isSeniorWorkflowStep(proposal.workflow, step.stepOrder),
+                step.isSeniorApprover,
           )
           .map((step) => step.approverId)
           .filter(Boolean),

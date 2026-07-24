@@ -2,9 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import {
   Mail,
+  Phone,
+  Camera,
   User as UserIcon,
   Lock,
   Eye,
@@ -23,16 +26,18 @@ import {
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { createUser, deleteUser, setUserActive, updateUser, type User } from "@/lib/api/users";
+import { createUser, deleteUser, setUserActive, updateUser, uploadUserAvatar, userAvatarFullUrl, type User } from "@/lib/api/users";
 import { getDepartments } from "@/lib/api/departments";
 import { getRoles, type Role as RoleRecord } from "@/lib/api/roles";
 import { useUser } from "@/lib/context/UserContext";
 import { hasPermission } from "@/lib/permissions";
+import { ExcelImportDialog } from "@/components/ui/ExcelImportDialog";
 
 type Department = { id: string; name: string };
 type EmployeeForm = {
   email: string;
   fullName: string;
+  phone: string;
   password: string;
   roleId: string;
   departmentIds: string[];
@@ -42,6 +47,7 @@ type EmployeeForm = {
 const EMPTY_FORM: EmployeeForm = {
   email: "",
   fullName: "",
+  phone: "",
   password: "Admin@123",
   roleId: "",
   departmentIds: [],
@@ -111,8 +117,41 @@ export default function EmployeesPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [processingUserId, setProcessingUserId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  const importExcel = async (file: File) => {
+    setImporting(true);
+    const toastId = toast.loading("Đang import nhân viên...");
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer());
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+      const existingEmails = new Set(users.map((item) => item.email.trim().toLowerCase()));
+      let success = 0, skipped = 0;
+      const errors: string[] = [];
+      for (let index = 0; index < rows.length; index++) {
+        const row = rows[index];
+        const fullName = String(row["Họ tên"] || row["Họ và tên"] || row["fullName"] || "").trim();
+        const email = String(row["Email"] || row["email"] || "").trim().toLowerCase();
+        if (!fullName || !email || existingEmails.has(email)) { skipped++; continue; }
+        const roleValue = String(row["Chức vụ"] || row["Vai trò"] || row["role"] || "").trim().toLowerCase();
+        const role = roles.find((item) => item.code.toLowerCase() === roleValue || item.name.toLowerCase() === roleValue) ?? roles.find((item) => item.code === "EMPLOYEE");
+        const departmentNames = String(row["Dự án"] || row["project"] || "").split(/[,;]/).map((item) => item.trim().toLowerCase()).filter(Boolean);
+        const departmentIds = departments.filter((item) => departmentNames.includes(item.name.toLowerCase())).map((item) => item.id);
+        try {
+          await createUser({ fullName, email, phone: String(row["Số điện thoại"] || row["Điện thoại"] || row["phone"] || "").trim(), password: String(row["Mật khẩu"] || row["password"] || "123456").trim() || "123456", roleId: role?.id, departmentIds });
+          existingEmails.add(email); success++;
+        } catch (error) { errors.push(`Dòng ${index + 2}: ${error instanceof Error ? error.message : "lỗi"}`); }
+      }
+      await refreshUsers();
+      const suffix = errors.length ? `, ${errors.length} lỗi` : "";
+      toast.success(`Import xong: ${success} thành công, ${skipped} bỏ qua${suffix}`, { id: toastId, duration: 6000 });
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Import thất bại", { id: toastId }); }
+    finally { setImporting(false); }
+  };
 
   useEffect(() => {
     Promise.all([getDepartments().then(setDepartments), getRoles().then(setRoles)]).finally(() =>
@@ -127,7 +166,7 @@ export default function EmployeesPage() {
   const filteredUsers = useMemo(() => {
     const q = query.trim().toLowerCase();
     return users.filter((u) => {
-      const matchesQuery = !q || u.fullName.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
+      const matchesQuery = !q || u.fullName.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.phone?.toLowerCase().includes(q);
       const matchesDept =
         !departmentFilter ||
         getUserDepartments(u).some((department) => department.id === departmentFilter);
@@ -152,6 +191,8 @@ export default function EmployeesPage() {
   const openCreateModal = () => {
     setEditingUserId(null);
     setForm({ ...EMPTY_FORM, roleId: getDefaultRoleId(roles) });
+    setAvatarFile(null);
+    setAvatarPreview(null);
     setFormError(null);
     setShowPassword(false);
     setShowForm(true);
@@ -162,11 +203,14 @@ export default function EmployeesPage() {
     setForm({
       email: u.email,
       fullName: u.fullName,
+      phone: u.phone ?? "",
       password: "",
       roleId: u.roleId ?? u.role?.id ?? "",
       departmentIds: getUserDepartments(u).map((department) => department.id),
       sendWelcomeEmail: false,
     });
+    setAvatarFile(null);
+    setAvatarPreview(userAvatarFullUrl(u.avatarUrl));
     setFormError(null);
     setShowPassword(false);
     setShowForm(true);
@@ -178,6 +222,8 @@ export default function EmployeesPage() {
     setEditingUserId(null);
     setShowPassword(false);
     setForm(EMPTY_FORM);
+    setAvatarFile(null);
+    setAvatarPreview(null);
     setFormError(null);
   };
 
@@ -196,11 +242,6 @@ export default function EmployeesPage() {
       setFormError("Vui lòng nhập email và họ tên");
       return;
     }
-    if (form.departmentIds.length === 0) {
-      toast.error("Vui lòng chọn phòng ban");
-      setFormError("Vui lòng chọn phòng ban");
-      return;
-    }
     setFormError(null);
     setSaving(true);
     const isEditing = Boolean(editingUserId);
@@ -212,19 +253,23 @@ export default function EmployeesPage() {
         await updateUser(editingUserId, {
           email: form.email,
           fullName: form.fullName,
+          phone: form.phone.trim(),
           ...(form.password ? { password: form.password } : {}),
           roleId: form.roleId || undefined,
           departmentIds: form.departmentIds,
         });
+        if (avatarFile) await uploadUserAvatar(editingUserId, avatarFile);
       } else {
         const created = await createUser({
           email: form.email,
           fullName: form.fullName,
+          phone: form.phone.trim(),
           password: form.password,
           roleId: form.roleId || undefined,
           departmentIds: form.departmentIds,
           sendWelcomeEmail: form.sendWelcomeEmail,
         });
+        if (avatarFile) await uploadUserAvatar(created.id, avatarFile);
         if (form.sendWelcomeEmail && !created.welcomeEmailSent) {
           toast.warning(
             `Đã tạo tài khoản nhưng chưa gửi email: ${created.welcomeEmailError ?? "Lỗi gửi email"}`,
@@ -244,6 +289,8 @@ export default function EmployeesPage() {
       setEditingUserId(null);
       setShowPassword(false);
       setForm(EMPTY_FORM);
+      setAvatarFile(null);
+      setAvatarPreview(null);
       setFormError(null);
       await refreshUsers();
     } catch (err) {
@@ -297,7 +344,13 @@ export default function EmployeesPage() {
       <PageHeader
         title="Quản lý nhân viên"
         description="Tạo tài khoản và phân quyền tham gia đề xuất"
-        action={
+        action={<div className="flex flex-wrap gap-2">
+          <ExcelImportDialog
+            title="nhân viên"
+            templateFileName="mau-import-nhan-vien.xlsx"
+            templateRow={{ "Họ tên": "Nguyễn Văn A", "Email": "nguyenvana@example.com", "Số điện thoại": "0912345678", "Mật khẩu": "123456", "Chức vụ": "EMPLOYEE", "Dự án": "Dự án Văn phòng" }}
+            onImport={importExcel}
+          />
           <button
             type="button"
             onClick={openCreateModal}
@@ -307,7 +360,7 @@ export default function EmployeesPage() {
             <UserIcon className="h-4 w-4" aria-hidden />
             Tạo nhân viên
           </button>
-        }
+        </div>}
       />
 
       {/* Summary stats */}
@@ -330,13 +383,13 @@ export default function EmployeesPage() {
           />
         </div>
         <select
-          title="Lọc theo phòng ban"
+          title="Lọc theo dự án"
           value={departmentFilter}
           onChange={(e) => setDepartmentFilter(e.target.value)}
           disabled={pageLoading}
           className="rounded-xl border border-border py-2 pl-3 pr-8 text-sm text-slate-600 transition-colors focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
         >
-          <option value="">Tất cả phòng ban</option>
+          <option value="">Tất cả dự án</option>
           {departments.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
@@ -354,7 +407,7 @@ export default function EmployeesPage() {
 
             <div className="relative z-[100000] flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
               {/* Header */}
-              <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <div className="flex items-center justify-between border-b border-border px-4 py-4 sm:px-6">
                 <h3 className="text-lg font-semibold text-slate-800">
                   {editingUserId ? "Sửa nhân viên" : "Tạo nhân viên"}
                 </h3>
@@ -369,10 +422,36 @@ export default function EmployeesPage() {
               </div>
 
               {/* Body */}
-              <div className="space-y-6 overflow-y-auto px-6 py-5">
+              <div className="space-y-6 overflow-y-auto px-4 py-5 sm:px-6">
                 <section className="space-y-3">
                   <SectionHeading title="Thông tin tài khoản" />
                   <div className="grid gap-3 md:grid-cols-2">
+                    <div className="flex items-center gap-4 rounded-xl border border-border bg-slate-50/60 p-3 md:col-span-2">
+                      <Avatar name={form.fullName || "?"} avatarUrl={avatarPreview} size="large" />
+                      <div className="min-w-0 flex-1">
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-primary-300 hover:text-primary-600">
+                          <Camera className="h-4 w-4" />
+                          Chọn ảnh đại diện
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            className="sr-only"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0] ?? null;
+                              if (!file) return;
+                              if (file.size > 3 * 1024 * 1024) {
+                                toast.error("Ảnh đại diện tối đa 3 MB");
+                                event.target.value = "";
+                                return;
+                              }
+                              setAvatarFile(file);
+                              setAvatarPreview(URL.createObjectURL(file));
+                            }}
+                          />
+                        </label>
+                        <p className="mt-1 text-xs text-slate-400">JPG, PNG hoặc WebP · tối đa 3 MB</p>
+                      </div>
+                    </div>
                     <IconInput
                       icon={Mail}
                       placeholder="Email"
@@ -385,6 +464,13 @@ export default function EmployeesPage() {
                       placeholder="Họ tên"
                       value={form.fullName}
                       onChange={(v) => setForm({ ...form, fullName: v })}
+                    />
+                    <IconInput
+                      icon={Phone}
+                      placeholder="Số điện thoại"
+                      type="tel"
+                      value={form.phone}
+                      onChange={(v) => setForm({ ...form, phone: v })}
                     />
                     <div className="relative md:col-span-2">
                       <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -428,13 +514,13 @@ export default function EmployeesPage() {
                 </section>
 
                 <section className="space-y-3">
-                  <SectionHeading title="Phòng ban & vai trò" />
+                  <SectionHeading title="Dự án & vai trò" />
                   <div className="grid gap-3 md:grid-cols-2">
                     <div>
                       <div className="rounded-xl border border-border bg-white">
                         <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-sm font-medium text-slate-700">
                           <Building2 className="h-4 w-4 text-slate-400" />
-                          Phòng ban
+                          Dự án
                         </div>
                         <div className="max-h-40 space-y-1 overflow-y-auto p-2">
                           {departments.map((d) => (
@@ -453,7 +539,7 @@ export default function EmployeesPage() {
                           ))}
                           {departments.length === 0 && (
                             <p className="px-2 py-3 text-sm text-slate-400">
-                              Chưa có phòng ban
+                              Chưa có dự án
                             </p>
                           )}
                         </div>
@@ -506,7 +592,7 @@ export default function EmployeesPage() {
               </div>
 
               {/* Footer */}
-              <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
+              <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-4 sm:gap-3 sm:px-6">
                 <button
                   type="button"
                   onClick={closeModal}
@@ -590,7 +676,7 @@ export default function EmployeesPage() {
           <div className="space-y-4 px-4 py-8">
             <div className="flex items-center justify-center gap-2 text-sm font-medium text-slate-500">
               <Loader2 size={16} className="animate-spin text-primary-600" />
-              Đang tải nhân viên, phòng ban và vai trò...
+              Đang tải nhân viên, dự án và vai trò...
             </div>
             <div className="space-y-3 animate-pulse">
               {[0, 1, 2, 3].map((item) => (
@@ -610,12 +696,48 @@ export default function EmployeesPage() {
             </div>
           </div>
         ) : (
-          <table className="w-full min-w-[760px] text-sm">
+          <>
+          <div className="space-y-3 p-2 md:hidden">
+            {filteredUsers.map((u) => (
+              <article key={u.id} className="rounded-xl border border-border bg-white p-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <Avatar name={u.fullName} avatarUrl={userAvatarFullUrl(u.avatarUrl)} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="break-words font-semibold text-slate-800">{u.fullName}</p>
+                      {!u.isActive && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">Đã khóa</span>}
+                    </div>
+                    <p className="break-all text-xs text-slate-500">{u.email}</p>
+                    {u.phone && <p className="text-xs text-slate-500">{u.phone}</p>}
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${ROLE_BADGE[getRoleCode(u.role)] ?? ROLE_BADGE.EMPLOYEE}`}>
+                    {getRoleName(u.role)}
+                  </span>
+                  {getUserDepartments(u).map((department) => (
+                    <span key={department.id} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">{department.name}</span>
+                  ))}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
+                  <div className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-2">Tạo đề xuất <PermissionMark active={hasPermission(u.role?.permissions, "proposal.create")} /></div>
+                  <div className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-2">Phê duyệt <PermissionMark active={hasPermission(u.role?.permissions, "proposal.approve")} /></div>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-1.5">
+                  <button type="button" onClick={() => openEditModal(u)} disabled={processingUserId === u.id} className="inline-flex items-center justify-center gap-1 rounded-lg border border-border px-2 py-2 text-xs font-medium text-slate-600"><Pencil className="h-3.5 w-3.5" />Sửa</button>
+                  <button type="button" onClick={() => handleToggleStatus(u)} disabled={processingUserId === u.id} className="inline-flex items-center justify-center gap-1 rounded-lg border border-amber-200 px-2 py-2 text-xs font-medium text-amber-700">{u.isActive ? <UserX className="h-3.5 w-3.5" /> : <UserCheck className="h-3.5 w-3.5" />}{u.isActive ? "Khóa" : "Mở"}</button>
+                  <button type="button" onClick={() => handleDelete(u)} disabled={processingUserId === u.id} className="inline-flex items-center justify-center gap-1 rounded-lg border border-red-200 px-2 py-2 text-xs font-medium text-red-600"><Trash2 className="h-3.5 w-3.5" />Xóa</button>
+                </div>
+              </article>
+            ))}
+            {filteredUsers.length === 0 && <div className="py-8 text-center text-sm text-slate-400">Không tìm thấy nhân viên phù hợp</div>}
+          </div>
+          <table className="hidden w-full min-w-[760px] text-sm md:table">
             <thead className="text-left text-xs uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="px-4 py-3 font-medium">Nhân viên</th>
                 <th className="px-4 py-3 font-medium">Vai trò</th>
-                <th className="px-4 py-3 font-medium">Phòng ban</th>
+                <th className="px-4 py-3 font-medium">Dự án</th>
                 <th className="px-4 py-3 text-center font-medium">Tạo đề xuất</th>
                 <th className="px-4 py-3 text-center font-medium">Duyệt đề xuất</th>
                 <th className="px-4 py-3 text-right font-medium">Thao tác</th>
@@ -630,7 +752,7 @@ export default function EmployeesPage() {
                   <tr key={u.id} className="transition-colors hover:bg-surface-muted/50">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <Avatar name={u.fullName} />
+                        <Avatar name={u.fullName} avatarUrl={userAvatarFullUrl(u.avatarUrl)} />
                         <div>
                           <div className="flex items-center gap-2">
                             <p className="font-medium text-slate-800">{u.fullName}</p>
@@ -641,6 +763,7 @@ export default function EmployeesPage() {
                             )}
                           </div>
                           <p className="text-xs text-slate-400">{u.email}</p>
+                          {u.phone && <p className="text-xs text-slate-400">{u.phone}</p>}
                         </div>
                       </div>
                     </td>
@@ -733,6 +856,7 @@ export default function EmployeesPage() {
               )}
             </tbody>
           </table>
+          </>
         )}
       </Card>
     </div>
@@ -785,7 +909,7 @@ function IconInput({
   );
 }
 
-function Avatar({ name }: { name: string }) {
+function Avatar({ name, avatarUrl, size = "normal" }: { name: string; avatarUrl?: string | null; size?: "normal" | "large" }) {
   const initials = name
     .trim()
     .split(/\s+/)
@@ -795,8 +919,16 @@ function Avatar({ name }: { name: string }) {
 
   const palette = AVATAR_PALETTE[hashIndex(name || "?", AVATAR_PALETTE.length)];
 
-  return (
-    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${palette}`}>
+  const sizeClass = size === "large" ? "h-16 w-16 text-base" : "h-9 w-9 text-xs";
+
+  return avatarUrl ? (
+    <img
+      src={avatarUrl}
+      alt={`Ảnh đại diện ${name}`}
+      className={`${sizeClass} shrink-0 rounded-full border border-border object-cover`}
+    />
+  ) : (
+    <div className={`flex ${sizeClass} shrink-0 items-center justify-center rounded-full font-semibold ${palette}`}>
       {initials || "?"}
     </div>
   );

@@ -6,13 +6,17 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 import { CurrentUserId } from '../common/decorators/current-user.decorator';
 import { SetUserStatusDto } from './dto/set-user-status.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @ApiTags('users')
 @Controller('users')
@@ -37,6 +41,46 @@ export class UsersController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
     return this.usersService.update(id, dto);
+  }
+
+  @Patch('me/profile')
+  updateMyProfile(
+    @CurrentUserId() currentUserId: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.usersService.updateProfile(currentUserId, dto);
+  }
+
+  @Post('me/avatar')
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  uploadMyAvatar(
+    @CurrentUserId() currentUserId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.usersService.uploadAvatar(currentUserId, file);
+  }
+
+  @Post(':id/avatar')
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  uploadAvatar(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.usersService.uploadAvatar(id, file);
   }
 
   @Patch(':id/status')

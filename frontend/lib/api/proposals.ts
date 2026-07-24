@@ -54,7 +54,8 @@ export type Proposal = {
     status: string;
     comment?: string | null;
     actedAt?: string | null;
-    approver: { id: string; fullName: string; email: string };
+    isSeniorApprover: boolean;
+    approver: { id: string; fullName: string; email: string; avatarUrl?: string | null };
   }>;
   attachments?: ProposalAttachment[];
   workflow?: {
@@ -65,12 +66,27 @@ export type Proposal = {
       stepOrder: number;
       label?: string | null;
       isSeniorApprover?: boolean;
-      approver: { id: string; fullName: string };
+      approver: { id: string; fullName: string; avatarUrl?: string | null };
     }>;
   } | null;
   createdAt: string;
   paidAt?: string | null;
   updatedAt: string;
+};
+
+export type ProposalComment = {
+  id: string;
+  proposalId: string;
+  authorId: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  author: {
+    id: string;
+    fullName: string;
+    email: string;
+    avatarUrl?: string | null;
+  };
 };
 
 export type ProposalStats = {
@@ -193,6 +209,21 @@ export async function cancelProposal(
 ): Promise<Proposal> {
   const { data } = await api.post<Proposal>(`/proposals/${id}/cancel`, {
     reason,
+  });
+  return data;
+}
+
+export async function getProposalComments(id: string): Promise<ProposalComment[]> {
+  const { data } = await api.get<ProposalComment[]>(`/proposals/${id}/comments`);
+  return data;
+}
+
+export async function addProposalComment(
+  id: string,
+  content: string,
+): Promise<ProposalComment> {
+  const { data } = await api.post<ProposalComment>(`/proposals/${id}/comments`, {
+    content,
   });
   return data;
 }

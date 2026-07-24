@@ -13,6 +13,6 @@ import { WebPushService } from './web-push.service';
     NotificationsStreamService,
     WebPushService,
   ],
-  exports: [NotificationsService],
+  exports: [NotificationsService, NotificationsStreamService],
 })
 export class NotificationsModule {}

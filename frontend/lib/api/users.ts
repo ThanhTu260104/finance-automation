@@ -1,10 +1,13 @@
 import api from "@/lib/api/client";
+import { getApiOrigin } from "@/lib/api/client";
 import type { Role } from "@/lib/api/roles";
 
 export type User = {
   id: string;
   email: string;
   fullName: string;
+  phone?: string | null;
+  avatarUrl?: string | null;
   roleId: string;
   role: Role;
   isActive: boolean;
@@ -20,6 +23,7 @@ export type User = {
 export type CreateUserPayload = {
   email: string;
   fullName: string;
+  phone?: string;
   password?: string;
   roleId?: string;
   departmentId?: string;
@@ -46,6 +50,36 @@ export async function updateUser(
 ): Promise<User> {
   const { data } = await api.patch<User>(`/users/${id}`, payload);
   return data;
+}
+
+export async function uploadUserAvatar(id: string, file: File): Promise<User> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<User>(`/users/${id}/avatar`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
+export async function updateMyProfile(payload: {
+  fullName: string;
+  phone?: string;
+}): Promise<User> {
+  const { data } = await api.patch<User>("/users/me/profile", payload);
+  return data;
+}
+
+export async function uploadMyAvatar(file: File): Promise<User> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<User>("/users/me/avatar", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
+export function userAvatarFullUrl(urlPath?: string | null): string | null {
+  return urlPath ? new URL(urlPath, getApiOrigin()).toString() : null;
 }
 
 export async function setUserActive(id: string, isActive: boolean): Promise<User> {

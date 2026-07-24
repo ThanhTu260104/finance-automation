@@ -14,14 +14,29 @@ import {
   RejectProposalDto,
 } from './dto/approve-proposal.dto';
 import { CreateProposalDto } from './dto/create-proposal.dto';
+import { CreateProposalCommentDto } from './dto/create-proposal-comment.dto';
 import { ProposalQueryDto } from './dto/proposal-query.dto';
 import { UpdateProposalDto } from './dto/update-proposal.dto';
 import { ProposalsService } from './proposals.service';
+import { NotificationsStreamService } from '../notifications/notifications-stream.service';
 
 @ApiTags('proposals')
 @Controller('proposals')
 export class ProposalsController {
-  constructor(private readonly proposalsService: ProposalsService) {}
+  constructor(
+    private readonly proposalsService: ProposalsService,
+    private readonly realtime: NotificationsStreamService,
+  ) {}
+
+  private async changed<T>(
+    proposalId: string,
+    action: string,
+    operation: Promise<T>,
+  ) {
+    const result = await operation;
+    this.realtime.broadcastProposalChange(proposalId, action);
+    return result;
+  }
 
   @Get('stats')
   getStats(@CurrentUserId() userId: string) {
@@ -34,13 +49,33 @@ export class ProposalsController {
   }
 
   @Post()
-  create(@CurrentUserId() userId: string, @Body() dto: CreateProposalDto) {
-    return this.proposalsService.create(userId, dto);
+  async create(@CurrentUserId() userId: string, @Body() dto: CreateProposalDto) {
+    const result = await this.proposalsService.create(userId, dto);
+    this.realtime.broadcastProposalChange(result.id, 'created');
+    return result;
   }
 
   @Get('projects')
-  getProjects() {
-    return this.proposalsService.getProjects();
+  getProjects(@CurrentUserId() userId: string) {
+    return this.proposalsService.getProjects(userId);
+  }
+
+  @Get(':id/comments')
+  getComments(@Param('id') id: string, @CurrentUserId() userId: string) {
+    return this.proposalsService.getComments(id, userId);
+  }
+
+  @Post(':id/comments')
+  addComment(
+    @Param('id') id: string,
+    @CurrentUserId() userId: string,
+    @Body() dto: CreateProposalCommentDto,
+  ) {
+    return this.changed(
+      id,
+      'commented',
+      this.proposalsService.addComment(id, userId, dto.content),
+    );
   }
 
   @Get(':id')
@@ -54,12 +89,12 @@ export class ProposalsController {
     @CurrentUserId() userId: string,
     @Body() dto: UpdateProposalDto,
   ) {
-    return this.proposalsService.update(id, userId, dto);
+    return this.changed(id, 'updated', this.proposalsService.update(id, userId, dto));
   }
 
   @Post(':id/submit')
   submit(@Param('id') id: string, @CurrentUserId() userId: string) {
-    return this.proposalsService.submit(id, userId);
+    return this.changed(id, 'submitted', this.proposalsService.submit(id, userId));
   }
 
   @Post(':id/approve')
@@ -68,7 +103,7 @@ export class ProposalsController {
     @CurrentUserId() userId: string,
     @Body() dto: ApproveProposalDto,
   ) {
-    return this.proposalsService.approve(id, userId, dto);
+    return this.changed(id, 'approved', this.proposalsService.approve(id, userId, dto));
   }
 
   @Post(':id/reject')
@@ -77,11 +112,11 @@ export class ProposalsController {
     @CurrentUserId() userId: string,
     @Body() dto: RejectProposalDto,
   ) {
-    return this.proposalsService.reject(id, userId, dto);
+    return this.changed(id, 'rejected', this.proposalsService.reject(id, userId, dto));
   }
 
   @Post(':id/mark-paid')
   markPaid(@Param('id') id: string, @CurrentUserId() userId: string) {
-    return this.proposalsService.markPaid(id, userId);
+    return this.changed(id, 'paid', this.proposalsService.markPaid(id, userId));
   }
 }

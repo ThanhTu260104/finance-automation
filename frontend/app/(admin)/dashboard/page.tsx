@@ -73,6 +73,7 @@ export default function DashboardPage() {
   const [recent, setRecent] = useState<RecentProposal[]>([]);
   const [pending, setPending] = useState<RecentProposal[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [realtimeVersion, setRealtimeVersion] = useState(0);
   const dashboardParams = useMemo(
     () => ({
       period,
@@ -80,7 +81,12 @@ export default function DashboardPage() {
     }),
     [period, selectedMonth, selectedWeekDate],
   );
-  const periodLabel = period === "month" ? "tháng đã chọn" : "tuần đã chọn";
+  const periodLabel =
+    period === "day"
+      ? "ngày đã chọn"
+      : period === "week"
+        ? "tuần đã chọn"
+        : "tháng đã chọn";
 
   useEffect(() => {
     if (userLoading) return;
@@ -152,17 +158,27 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [currentUser?.id, dashboardParams, userLoading]);
+  }, [currentUser?.id, dashboardParams, realtimeVersion, userLoading]);
+
+  useEffect(() => {
+    const refresh = () => setRealtimeVersion((value) => value + 1);
+    window.addEventListener("finance:proposal-change", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("finance:proposal-change", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
 
   const stats = [
     {
-      label: "Chờ duyệt (toàn hệ thống)",
+      label: "Chờ duyệt (trong phạm vi)",
       value: summary?.pendingInvoices ?? "—",
       icon: FileClock,
       tint: "bg-sky-50 text-sky-600",
     },
     {
-      label: "Đã duyệt tháng này",
+      label: `Đã duyệt (${periodLabel})`,
       value: summary?.reportsGenerated ?? "—",
       icon: CheckCircle2,
       tint: "bg-success-light text-success",
@@ -232,7 +248,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <div className="inline-flex rounded-lg bg-surface-muted p-1">
-              {(["week", "month"] as DashboardPeriod[]).map((item) => (
+              {(["day", "week", "month"] as DashboardPeriod[]).map((item) => (
                 <button
                   key={item}
                   type="button"
@@ -243,7 +259,11 @@ export default function DashboardPage() {
                       : "text-slate-500 hover:text-slate-700"
                   }`}
                 >
-                  {item === "week" ? "Theo tuần" : "Theo tháng"}
+                  {item === "day"
+                    ? "Theo ngày"
+                    : item === "week"
+                      ? "Theo tuần"
+                      : "Theo tháng"}
                 </button>
               ))}
             </div>
@@ -323,12 +343,12 @@ export default function DashboardPage() {
           {pending.length === 0 ? (
             <EmptyState icon={CheckCircle2} text="Không có đề xuất cần duyệt" />
           ) : (
-            <ul className="space-y-1">
+            <ul className="space-y-2">
               {pending.map((p) => (
                 <li key={p.id}>
                   <Link
                     href={`/proposals/${p.id}`}
-                    className="flex items-center justify-between gap-3 rounded-xl px-2 py-2.5 text-sm transition-colors hover:bg-slate-50"
+                    className="block rounded-xl border border-slate-100 p-3 text-sm transition-colors hover:bg-slate-50 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:border-0 sm:px-2 sm:py-2.5"
                   >
                     <div className="min-w-0">
                       <p className="truncate font-medium text-slate-800">
@@ -336,7 +356,7 @@ export default function DashboardPage() {
                       </p>
                       <p className="text-xs text-slate-400">{p.code}</p>
                     </div>
-                    <ProposalStatusBadge status={p.status as never} />
+                    <div className="mt-2 sm:mt-0"><ProposalStatusBadge status={p.status as never} /></div>
                   </Link>
                 </li>
               ))}
@@ -364,12 +384,12 @@ export default function DashboardPage() {
           {recent.length === 0 ? (
             <EmptyState icon={FileText} text="Chưa có đề xuất nào" />
           ) : (
-            <ul className="space-y-1">
+            <ul className="space-y-2">
               {recent.map((p) => (
                 <li key={p.id}>
                   <Link
                     href={`/proposals/${p.id}`}
-                    className="flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-slate-50"
+                    className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-xl border border-slate-100 p-3 transition-colors hover:bg-slate-50 sm:flex sm:items-center sm:border-0 sm:px-2 sm:py-2.5"
                   >
                     <span className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-500">
                       {initials(p.creator.fullName)}
@@ -378,11 +398,11 @@ export default function DashboardPage() {
                       <p className="truncate text-sm font-medium text-slate-800">
                         {p.title}
                       </p>
-                      <p className="text-xs text-slate-400">
+                      <p className="mt-0.5 line-clamp-2 text-xs text-slate-400">
                         {p.creator.fullName} · {formatDateTime(p.createdAt)}
                       </p>
                     </div>
-                    <ProposalStatusBadge status={p.status as never} />
+                    <div className="col-start-2 sm:col-auto"><ProposalStatusBadge status={p.status as never} /></div>
                   </Link>
                 </li>
               ))}

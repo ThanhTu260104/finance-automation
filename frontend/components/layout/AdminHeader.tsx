@@ -1,12 +1,13 @@
 "use client";
 
-import { Bell, ChevronDown, Loader2, LogOut, Menu } from "lucide-react";
+import { Bell, LogOut, Menu } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { siteConfig } from "@/config/site";
 import { useUser } from "@/lib/context/UserContext";
 import { useEffect, useState } from "react";
 import { fetchNotifications, markNotificationRead, subscribeToNotifications } from "@/lib/api/notifications";
 import NotificationsList from "@/components/ui/NotificationsList";
+import { userAvatarFullUrl } from "@/lib/api/users";
 
 type AdminHeaderProps = {
   onToggleSidebar?: () => void;
@@ -15,7 +16,7 @@ type AdminHeaderProps = {
 
 export function AdminHeader({ onToggleSidebar, sidebarCollapsed = false }: AdminHeaderProps) {
   const router = useRouter();
-  const { currentUser, users, setCurrentUserId, logout, loading: usersLoading } = useUser();
+  const { currentUser, logout, loading: usersLoading } = useUser();
 
   type NotificationItem = {
     id: string;
@@ -120,9 +121,17 @@ export function AdminHeader({ onToggleSidebar, sidebarCollapsed = false }: Admin
     };
 
     const stream = subscribeToNotifications(currentUser.id);
-    stream.addEventListener('notification', refreshNotifications);
+    const refreshApplicationData = () => {
+      window.dispatchEvent(new CustomEvent("finance:proposal-change"));
+    };
+    const handleNotification = () => {
+      void refreshNotifications();
+      refreshApplicationData();
+    };
+    stream.addEventListener('notification', handleNotification);
     stream.addEventListener('refresh', refreshNotifications);
     stream.addEventListener('connected', refreshNotifications);
+    stream.addEventListener('proposal-change', refreshApplicationData);
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') refreshNotifications();
@@ -245,29 +254,18 @@ export function AdminHeader({ onToggleSidebar, sidebarCollapsed = false }: Admin
           </div>
         ) : null}
 
-        <div className="relative w-24 flex-none sm:w-auto sm:max-w-[180px]">
-          <select
-            className="w-full appearance-none truncate rounded-xl border border-border bg-surface py-2 pl-3 pr-8 text-sm font-medium text-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
-            value={currentUser?.id ?? ""}
-            onChange={(e) => setCurrentUserId(e.target.value)}
-            disabled={usersLoading && users.length === 0}
-          >
-            {usersLoading && users.length === 0 ? (
-              <option value="">Đang tải nhân viên...</option>
-            ) : (
-              users.filter((u) => u.isActive).map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.fullName}
-                </option>
-              ))
-            )}
-          </select>
-          {usersLoading && users.length === 0 ? (
-            <Loader2 className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" />
-          ) : (
-            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => router.push("/profile")}
+          disabled={usersLoading || !currentUser}
+          title="Thông tin tài khoản"
+          className="flex max-w-[170px] items-center gap-2 rounded-xl border border-border bg-surface px-2 py-1.5 text-left transition hover:border-primary-300 hover:bg-primary-50/40 disabled:opacity-60 sm:max-w-[220px]"
+        >
+          <HeaderAvatar name={currentUser?.fullName ?? ""} avatarUrl={currentUser?.avatarUrl} />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
+            {currentUser?.fullName ?? "Đang tải..."}
+          </span>
+        </button>
 
         <button
           type="button"
@@ -280,5 +278,18 @@ export function AdminHeader({ onToggleSidebar, sidebarCollapsed = false }: Admin
         </button>
       </div>
     </header>
+  );
+}
+
+function HeaderAvatar({ name, avatarUrl }: { name: string; avatarUrl?: string | null }) {
+  const url = userAvatarFullUrl(avatarUrl);
+  const initials = name.trim().split(/\s+/).slice(-2).map((part) => part[0]?.toUpperCase()).join("") || "?";
+
+  return url ? (
+    <img src={url} alt="" className="h-8 w-8 shrink-0 rounded-full border border-slate-200 object-cover" />
+  ) : (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-[10px] font-bold text-primary-700">
+      {initials}
+    </span>
   );
 }

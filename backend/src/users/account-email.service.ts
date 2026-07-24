@@ -28,6 +28,10 @@ export class AccountEmailService {
       host: appEnv.smtpHost,
       port: appEnv.smtpPort,
       secure: appEnv.smtpSecure,
+      requireTLS: !appEnv.smtpSecure,
+      tls: {
+        minVersion: 'TLSv1.2',
+      },
       auth: {
         user: appEnv.smtpUser,
         pass: appEnv.smtpPassword,
@@ -37,8 +41,13 @@ export class AccountEmailService {
     try {
       await transporter.sendMail({
         from: appEnv.smtpFrom,
+        replyTo: appEnv.smtpReplyTo || appEnv.smtpUser,
+        envelope: {
+          from: appEnv.smtpUser,
+          to: account.email,
+        },
         to: account.email,
-        subject: 'Tài khoản SAW - REQUESTS của bạn',
+        subject: '[SAW Requests] Thông tin đăng nhập tài khoản',
         text: this.plainText(account),
         html: this.html(account),
       });
@@ -59,7 +68,13 @@ export class AccountEmailService {
       `Đăng nhập tại: ${appEnv.frontendUrl}/login`,
       '',
       'Vui lòng đổi mật khẩu sau khi đăng nhập.',
-      'Hỗ trợ: 0968549276',
+      'Đây là email giao dịch được gửi vì quản trị viên đã tạo tài khoản cho bạn.',
+      '',
+      'TRẦN THANH TÚ',
+      'SICOM INVESTMENT CONSTRUCTION JSC (SICOM)',
+      '42/30 Hoàng Diệu, Phường Xóm Chiếu, Thành phố Hồ Chí Minh',
+      'Mobile: 0968549276 | Email: tr.thanhtu.dev@gmail.com',
+      'Website: https://www.sicom.com.vn',
     ].join('\n');
   }
 
@@ -70,7 +85,10 @@ export class AccountEmailService {
     const loginUrl = `${appEnv.frontendUrl.replace(/\/+$/, '')}/login`;
 
     return `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#1e293b">
+      <div style="font-family:'Google Sans',Arial,sans-serif;max-width:600px;margin:auto;color:#1e293b">
+        <div style="display:none;max-height:0;overflow:hidden;color:transparent">
+          Thông tin đăng nhập tài khoản SAW Requests của bạn.
+        </div>
         <h2 style="color:#059669">Tài khoản SAW - REQUESTS</h2>
         <p>Xin chào <strong>${name}</strong>,</p>
         <p>Tài khoản của bạn đã được tạo thành công.</p>
@@ -82,7 +100,21 @@ export class AccountEmailService {
           <a href="${loginUrl}" style="background:#059669;color:white;text-decoration:none;padding:12px 18px;border-radius:8px">Đăng nhập hệ thống</a>
         </p>
         <p>Vui lòng đổi mật khẩu sau khi đăng nhập.</p>
-        <p style="color:#64748b">Hỗ trợ: 0968549276</p>
+        <div style="border-top:1px solid #e2e8f0;margin-top:24px;padding-top:16px;color:#64748b;font-size:13px">
+          <p>Email giao dịch này được gửi vì quản trị viên đã tạo tài khoản SAW Requests cho bạn.</p>
+        </div>
+        <div style="border-top:1px solid #94a3b8;margin-top:18px;padding-top:16px;color:#2f7028;font-family:'Google Sans',Arial,sans-serif;font-size:15px;line-height:1.55">
+          <p style="margin:0;font-weight:700">TRẦN THANH TÚ</p>
+          <p style="margin:0">SICOM INVESTMENT CONSTRUCTION JSC (SICOM)</p>
+          <p style="margin:0">42/30 Hoàng Diệu, Phường Xóm Chiếu, Thành phố Hồ Chí Minh</p>
+          <p style="margin:0">
+            Mobile: 0968549276 |
+            Email: <a href="mailto:tr.thanhtu.dev@gmail.com" style="color:#1457c5">tr.thanhtu.dev@gmail.com</a> |
+          </p>
+          <p style="margin:0">
+            Website: <a href="https://www.sicom.com.vn" style="color:#1457c5">www.sicom.com.vn</a>
+          </p>
+        </div>
       </div>`;
   }
 

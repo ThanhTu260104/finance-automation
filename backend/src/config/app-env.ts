@@ -63,6 +63,7 @@ export const appEnv = {
   swaggerPath: envValue('SWAGGER_PATH', apiPrefix ? `${apiPrefix}/docs` : 'docs'),
   uploadDir,
   proposalUploadDir: join(uploadDir, 'proposals'),
+  avatarUploadDir: join(uploadDir, 'avatars'),
   uploadUrlPrefix,
   maxUploadFileSizeBytes: numberEnv('MAX_UPLOAD_FILE_SIZE_MB', 15) * 1024 * 1024,
   bcryptSaltRounds: numberEnv('BCRYPT_SALT_ROUNDS', 10),
@@ -72,5 +73,6 @@ export const appEnv = {
   smtpUser: process.env.SMTP_USER?.trim(),
   smtpPassword: process.env.SMTP_PASSWORD?.trim(),
   smtpFrom: process.env.SMTP_FROM?.trim(),
+  smtpReplyTo: process.env.SMTP_REPLY_TO?.trim(),
   frontendUrl: envValue('FRONTEND_URL', 'https://saw.sicom.com.vn'),
 };

@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import * as XLSX from "xlsx";
 import { toast } from "sonner";
-import { Plus, Pencil, Search, X, AlertCircle, Loader2, Shield } from "lucide-react";
+import { Plus, Pencil, Search, X, AlertCircle, Loader2, Shield, LockKeyhole, LockOpen, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { createRole, getRoles, updateRole, type Role } from "@/lib/api/roles";
+import { createRole, deleteRole, getRoles, updateRole, type Role } from "@/lib/api/roles";
+import { ExcelImportDialog } from "@/components/ui/ExcelImportDialog";
 import { useUser } from "@/lib/context/UserContext";
 import {
   defaultPermissionsForRole,
@@ -20,6 +22,8 @@ export default function RolesPage() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [statusTab, setStatusTab] = useState<"active" | "locked">("active");
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -32,6 +36,28 @@ export default function RolesPage() {
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+
+  const importExcel = async (file: File) => {
+    setImporting(true);
+    const toastId = toast.loading("Đang import chức vụ...");
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer());
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+      const existing = new Set(roles.map((item) => item.code.trim().toUpperCase()));
+      let success = 0, skipped = 0;
+      for (const row of rows) {
+        const code = String(row["Mã chức vụ"] || row["Mã"] || row["code"] || "").trim().toUpperCase();
+        const name = String(row["Tên chức vụ"] || row["Tên"] || row["name"] || "").trim();
+        if (!code || !name || existing.has(code)) { skipped++; continue; }
+        await createRole({ code, name, description: String(row["Mô tả"] || row["description"] || "").trim(), sortOrder: Number(row["Thứ tự"] || row["sortOrder"] || 0) || 0, permissions: defaultPermissionsForRole(code) });
+        existing.add(code); success++;
+      }
+      await load();
+      toast.success(`Import xong: ${success} thành công, ${skipped} bỏ qua`, { id: toastId });
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Import thất bại", { id: toastId }); }
+    finally { setImporting(false); }
+  };
 
   const load = () => {
     return getRoles()
@@ -49,13 +75,32 @@ export default function RolesPage() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return roles;
     return roles.filter(
       (r) =>
-        r.name.toLowerCase().includes(q) ||
-        r.code.toLowerCase().includes(q)
+        r.isActive === (statusTab === "active") &&
+        (!q || r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q))
     );
-  }, [roles, query]);
+  }, [roles, query, statusTab]);
+
+  const toggleStatus = async (role: Role) => {
+    const nextActive = !role.isActive;
+    if (!window.confirm(`${nextActive ? "Mở khóa" : "Khóa"} chức vụ “${role.name}”?`)) return;
+    setProcessingId(role.id);
+    try {
+      await updateRole(role.id, { isActive: nextActive });
+      toast.success(nextActive ? "Đã mở khóa chức vụ" : "Đã khóa chức vụ");
+      await load(); await refreshUsers();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "Không thể cập nhật chức vụ"); }
+    finally { setProcessingId(null); }
+  };
+
+  const remove = async (role: Role) => {
+    if (!window.confirm(`Xóa vĩnh viễn chức vụ “${role.name}”? Thao tác này không thể hoàn tác.`)) return;
+    setProcessingId(role.id);
+    try { await deleteRole(role.id); toast.success("Đã xóa chức vụ"); await load(); }
+    catch (err) { toast.error(err instanceof Error ? err.message : "Không thể xóa chức vụ"); }
+    finally { setProcessingId(null); }
+  };
 
   const openCreate = () => {
     setEditingId(null);
@@ -165,7 +210,13 @@ export default function RolesPage() {
       <PageHeader
         title="Danh mục chức vụ"
         description="Quản lý chức vụ và phân quyền"
-        action={
+        action={<div className="flex flex-wrap gap-2">
+          <ExcelImportDialog
+            title="chức vụ"
+            templateFileName="mau-import-chuc-vu.xlsx"
+            templateRow={{ "Mã chức vụ": "NHAN_VIEN", "Tên chức vụ": "Nhân viên", "Mô tả": "Nhân viên công ty", "Thứ tự": 10 }}
+            onImport={importExcel}
+          />
           <button
             onClick={openCreate}
             className="flex items-center gap-1.5 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700"
@@ -173,8 +224,13 @@ export default function RolesPage() {
             <Plus className="h-4 w-4" aria-hidden />
             Tạo chức vụ
           </button>
-        }
+        </div>}
       />
+
+      <div className="mb-4 inline-flex rounded-xl bg-surface-muted p-1">
+        <button onClick={() => setStatusTab("active")} className={`rounded-lg px-4 py-2 text-sm font-medium ${statusTab === "active" ? "bg-white text-primary-700 shadow-sm" : "text-slate-500"}`}>Đang hoạt động ({roles.filter((role) => role.isActive).length})</button>
+        <button onClick={() => setStatusTab("locked")} className={`rounded-lg px-4 py-2 text-sm font-medium ${statusTab === "locked" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>Đã khóa ({roles.filter((role) => !role.isActive).length})</button>
+      </div>
 
       {/* Search */}
       <div className="relative mb-4 max-w-xs">
@@ -195,7 +251,7 @@ export default function RolesPage() {
             <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={closeModal} />
 
             <div className="relative z-10 w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl max-h-[90vh] overflow-y-auto">
-              <div className="flex items-center justify-between border-b border-border px-6 py-4 sticky top-0 bg-white">
+              <div className="sticky top-0 flex items-center justify-between border-b border-border bg-white px-4 py-4 sm:px-6">
                 <h3 className="text-lg font-semibold text-slate-800">
                   {editingId ? "Sửa chức vụ" : "Tạo chức vụ"}
                 </h3>
@@ -209,8 +265,8 @@ export default function RolesPage() {
                 </button>
               </div>
 
-              <div className="px-6 py-5 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-4 px-4 py-5 sm:px-6">
+                <div className="grid gap-4 sm:grid-cols-2">
                   {/* Mã chức vụ */}
                   <label className="block">
                     <span className="text-sm font-medium text-slate-700">Mã chức vụ</span>
@@ -297,7 +353,7 @@ export default function RolesPage() {
                 )}
               </div>
 
-              <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4 sticky bottom-0 bg-white">
+              <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-border bg-white px-4 py-4 sm:gap-3 sm:px-6">
                 <button
                   onClick={closeModal}
                   disabled={saving}
@@ -327,7 +383,30 @@ export default function RolesPage() {
             Đang tải chức vụ...
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <>
+          <div className="space-y-3 p-2 md:hidden">
+            {filtered.map((r) => (
+              <article key={r.id} className="rounded-xl border border-border bg-white p-3">
+                <div className="flex min-w-0 items-start gap-2.5">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600"><Shield className="h-4 w-4" /></div>
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words font-semibold text-slate-800">{r.name}</p>
+                    <p className="font-mono text-xs text-slate-500">{r.code}</p>
+                    {r.description && <p className="mt-1 line-clamp-2 text-xs text-slate-500">{r.description}</p>}
+                  </div>
+                </div>
+                <p className="mt-3 rounded-lg bg-slate-50 px-2.5 py-2 text-xs text-slate-600">{summarizePermissions(r.permissions)}</p>
+                <Link href={`/roles/${r.id}/permissions`} className="mt-2 inline-flex w-full items-center justify-center rounded-lg border border-primary-200 px-3 py-2 text-xs font-medium text-primary-700">Thiết lập quyền</Link>
+                <div className="mt-2 grid grid-cols-3 gap-1.5">
+                  <button onClick={() => openEdit(r)} disabled={processingId === r.id} className="inline-flex items-center justify-center gap-1 rounded-lg border border-border px-2 py-2 text-xs font-medium text-slate-600"><Pencil className="h-3.5 w-3.5" />Sửa</button>
+                  <button onClick={() => toggleStatus(r)} disabled={processingId === r.id} className="inline-flex items-center justify-center gap-1 rounded-lg border border-amber-200 px-2 py-2 text-xs font-medium text-amber-700">{r.isActive ? <LockKeyhole className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}{r.isActive ? "Khóa" : "Mở"}</button>
+                  <button onClick={() => remove(r)} disabled={processingId === r.id} className="inline-flex items-center justify-center gap-1 rounded-lg border border-red-200 px-2 py-2 text-xs font-medium text-red-600"><Trash2 className="h-3.5 w-3.5" />Xóa</button>
+                </div>
+              </article>
+            ))}
+            {filtered.length === 0 && <div className="py-8 text-center text-sm text-slate-400">Không có chức vụ phù hợp</div>}
+          </div>
+          <table className="hidden w-full text-sm md:table">
             <thead className="text-left text-xs uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="px-4 py-3 font-medium">Mã</th>
@@ -392,13 +471,11 @@ export default function RolesPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => openEdit(r)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-primary-300 hover:text-primary-600"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                      Sửa
-                    </button>
+                    <div className="flex flex-wrap justify-end gap-1.5">
+                      <button onClick={() => openEdit(r)} disabled={processingId === r.id} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-primary-300 hover:text-primary-600 disabled:opacity-50"><Pencil className="h-3.5 w-3.5" />Sửa</button>
+                      <button onClick={() => toggleStatus(r)} disabled={processingId === r.id} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 px-2.5 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50">{r.isActive ? <LockKeyhole className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}{r.isActive ? "Khóa" : "Mở khóa"}</button>
+                      <button onClick={() => remove(r)} disabled={processingId === r.id} className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" />Xóa</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -406,12 +483,13 @@ export default function RolesPage() {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">
-                    {roles.length === 0 ? "Chưa có chức vụ nào" : "Không tìm thấy chức vụ phù hợp"}
+                    {roles.length === 0 ? "Chưa có chức vụ nào" : statusTab === "active" ? "Không có chức vụ đang hoạt động phù hợp" : "Không có chức vụ đã khóa phù hợp"}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          </>
         )}
       </Card>
     </div>

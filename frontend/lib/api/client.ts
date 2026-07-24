@@ -77,7 +77,7 @@ export type DashboardSummary = {
   periodEnd?: string;
 };
 
-export type DashboardPeriod = "week" | "month";
+export type DashboardPeriod = "day" | "week" | "month";
 
 export type DashboardQuery = {
   period?: DashboardPeriod;

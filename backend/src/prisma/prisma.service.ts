@@ -2,6 +2,7 @@ import { Global, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { PrismaClient } from '@prisma/client';
+import { resolveDatabaseUrl } from '../config/database-url';
 
 @Global()
 @Injectable()
@@ -10,12 +11,13 @@ export class PrismaService
   implements OnModuleInit, OnModuleDestroy
 {
   constructor() {
-    if (!process.env.DATABASE_URL) {
+    const databaseUrl = resolveDatabaseUrl();
+    if (!databaseUrl) {
       throw new Error('DATABASE_URL is required');
     }
 
     const pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: databaseUrl,
     });
     const adapter = new PrismaPg(pool);
     super({ adapter });

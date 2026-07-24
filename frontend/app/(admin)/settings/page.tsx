@@ -6,6 +6,7 @@ import {
   AlertCircle,
   BadgeCheck,
   CheckCircle2,
+  ChevronDown,
   CircleOff,
   Clock3,
   Loader2,
@@ -20,7 +21,7 @@ import {
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { getUsers } from "@/lib/api/users";
+import { getUsers, userAvatarFullUrl } from "@/lib/api/users";
 import {
   createWorkflow,
   getProposalTypes,
@@ -31,7 +32,7 @@ import {
   type WorkflowParticipant,
 } from "@/lib/api/workflows";
 
-type UserOption = { id: string; fullName: string };
+type UserOption = { id: string; fullName: string; email: string; avatarUrl?: string | null };
 
 type WorkflowForm = {
   name: string;
@@ -828,36 +829,10 @@ function BulkWorkflowModal({
               <SectionHeading title="Cấp phê duyệt mới" />
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="Người duyệt cấp 1" error={approverError} required>
-                  <select
-                    value={form.approver1}
-                    onChange={(event) =>
-                      onChange({ ...form, approver1: event.target.value })
-                    }
-                    className={inputClass(!!approverError)}
-                  >
-                    <option value="">Chọn người duyệt...</option>
-                    {users.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.fullName}
-                      </option>
-                    ))}
-                  </select>
+                  <UserSelect users={users} value={form.approver1} onChange={(value) => onChange({ ...form, approver1: value })} placeholder="Chọn người duyệt..." hasError={!!approverError} />
                 </Field>
                 <Field label="Người duyệt cấp cao">
-                  <select
-                    value={form.approver2}
-                    onChange={(event) =>
-                      onChange({ ...form, approver2: event.target.value })
-                    }
-                    className={inputClass(false)}
-                  >
-                    <option value="">Không có</option>
-                    {users.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.fullName}
-                      </option>
-                    ))}
-                  </select>
+                  <UserSelect users={users} value={form.approver2} onChange={(value) => onChange({ ...form, approver2: value })} placeholder="Không có" allowEmpty />
                 </Field>
               </div>
             </section>
@@ -1081,32 +1056,10 @@ function WorkflowModal({
             />
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="Người duyệt cấp 1" error={approverError} required>
-                <select
-                  value={form.approver1}
-                  onChange={(event) => onChange({ ...form, approver1: event.target.value })}
-                  className={inputClass(!!approverError)}
-                >
-                  <option value="">Chọn người duyệt...</option>
-                  {users.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.fullName}
-                    </option>
-                  ))}
-                </select>
+                <UserSelect users={users} value={form.approver1} onChange={(value) => onChange({ ...form, approver1: value })} placeholder="Chọn người duyệt..." hasError={!!approverError} />
               </Field>
               <Field label="Người duyệt cấp cao">
-                <select
-                  value={form.approver2}
-                  onChange={(event) => onChange({ ...form, approver2: event.target.value })}
-                  className={inputClass(false)}
-                >
-                  <option value="">Không có</option>
-                  {users.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.fullName}
-                    </option>
-                  ))}
-                </select>
+                <UserSelect users={users} value={form.approver2} onChange={(value) => onChange({ ...form, approver2: value })} placeholder="Không có" allowEmpty />
               </Field>
             </div>
           </section>
@@ -1234,6 +1187,83 @@ function Field({
   );
 }
 
+function UserAvatar({ user, size = "md" }: { user: UserOption; size?: "sm" | "md" }) {
+  const url = userAvatarFullUrl(user.avatarUrl);
+  const initials = user.fullName.trim().split(/\s+/).slice(-2).map((part) => part[0]?.toUpperCase()).join("") || "?";
+  const sizeClass = size === "sm" ? "h-6 w-6 text-[9px]" : "h-9 w-9 text-xs";
+  return url ? (
+    <img src={url} alt="" className={`${sizeClass} shrink-0 rounded-full border border-slate-200 object-cover`} />
+  ) : (
+    <span className={`${sizeClass} flex shrink-0 items-center justify-center rounded-full bg-primary-50 font-bold text-primary-700`}>{initials}</span>
+  );
+}
+
+function UserSelect({
+  users,
+  value,
+  onChange,
+  placeholder,
+  allowEmpty = false,
+  hasError = false,
+}: {
+  users: UserOption[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder: string;
+  allowEmpty?: boolean;
+  hasError?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selectedUser = users.find((user) => user.id === value);
+  const filtered = users.filter((user) => {
+    const term = query.trim().toLowerCase();
+    return !term || user.fullName.toLowerCase().includes(term) || user.email.toLowerCase().includes(term);
+  });
+
+  return (
+    <div className="relative mt-1.5" onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+    }}>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className={`flex min-h-11 w-full items-center gap-2 rounded-xl border bg-white px-3 py-1.5 text-left transition focus:outline-none focus:ring-2 focus:ring-primary-500/30 ${hasError ? "border-red-400" : "border-border"}`}
+      >
+        {selectedUser ? <UserAvatar user={selectedUser} /> : <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-400"><Users className="h-4 w-4" /></span>}
+        <span className="min-w-0 flex-1">
+          <span className={`block truncate text-sm ${selectedUser ? "font-medium text-slate-800" : "text-slate-400"}`}>{selectedUser?.fullName ?? placeholder}</span>
+          {selectedUser && <span className="block truncate text-xs font-normal text-slate-400">{selectedUser.email}</span>}
+        </span>
+        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-[100010] mt-1 w-full overflow-hidden rounded-xl border border-border bg-white shadow-xl">
+          <div className="border-b border-border p-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tên hoặc email..." className="w-full rounded-lg border border-border py-2 pl-8 pr-2 text-sm outline-none focus:border-primary-500" />
+            </div>
+          </div>
+          <div className="max-h-56 overflow-y-auto p-1">
+            {allowEmpty && (
+              <button type="button" onClick={() => { onChange(""); setOpen(false); setQuery(""); }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-50">{placeholder}</button>
+            )}
+            {filtered.map((user) => (
+              <button key={user.id} type="button" onClick={() => { onChange(user.id); setOpen(false); setQuery(""); }} className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-surface-muted ${user.id === value ? "bg-primary-50" : ""}`}>
+                <UserAvatar user={user} />
+                <span className="min-w-0"><span className="block truncate text-sm font-medium text-slate-800">{user.fullName}</span><span className="block truncate text-xs text-slate-400">{user.email}</span></span>
+              </button>
+            ))}
+            {filtered.length === 0 && <p className="px-3 py-5 text-center text-sm text-slate-400">Không tìm thấy tài khoản</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MultiUserPicker({
   label,
   users,
@@ -1275,6 +1305,7 @@ function MultiUserPicker({
               key={user.id}
               className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2.5 py-1 text-xs font-semibold text-primary-700"
             >
+              <UserAvatar user={user} size="sm" />
               {user.fullName}
               <button
                 type="button"
@@ -1316,7 +1347,11 @@ function MultiUserPicker({
                 onChange={() => toggle(user.id)}
                 className="h-4 w-4 rounded border-border"
               />
-              {user.fullName}
+              <UserAvatar user={user} />
+              <span className="min-w-0">
+                <span className="block truncate font-medium text-slate-700">{user.fullName}</span>
+                <span className="block truncate text-xs text-slate-400">{user.email}</span>
+              </span>
             </label>
           ))
         )}

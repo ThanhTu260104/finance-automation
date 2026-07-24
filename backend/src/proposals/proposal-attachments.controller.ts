@@ -13,11 +13,15 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBody, ApiConsumes, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ProposalAttachmentKind } from '@prisma/client';
 import { ProposalAttachmentsService } from './proposal-attachments.service';
+import { NotificationsStreamService } from '../notifications/notifications-stream.service';
 
 @ApiTags('proposal-attachments')
 @Controller('proposals')
 export class ProposalAttachmentsController {
-  constructor(private readonly attachments: ProposalAttachmentsService) {}
+  constructor(
+    private readonly attachments: ProposalAttachmentsService,
+    private readonly realtime: NotificationsStreamService,
+  ) {}
 
   @Get(':id/attachments')
   list(@Param('id') id: string) {
@@ -34,7 +38,7 @@ export class ProposalAttachmentsController {
     },
   })
   @UseInterceptors(FileInterceptor('file'))
-  upload(
+  async upload(
     @Param('id') id: string,
     @Query('kind') kind: ProposalAttachmentKind,
     @UploadedFile() file: Express.Multer.File,
@@ -42,14 +46,18 @@ export class ProposalAttachmentsController {
     if (!Object.values(ProposalAttachmentKind).includes(kind)) {
       throw new BadRequestException('kind không hợp lệ');
     }
-    return this.attachments.upload(id, kind, file);
+    const result = await this.attachments.upload(id, kind, file);
+    this.realtime.broadcastProposalChange(id, 'attachment-uploaded');
+    return result;
   }
 
   @Delete(':id/attachments/:attachmentId')
-  remove(
+  async remove(
     @Param('id') id: string,
     @Param('attachmentId') attachmentId: string,
   ) {
-    return this.attachments.remove(id, attachmentId);
+    const result = await this.attachments.remove(id, attachmentId);
+    this.realtime.broadcastProposalChange(id, 'attachment-removed');
+    return result;
   }
 }

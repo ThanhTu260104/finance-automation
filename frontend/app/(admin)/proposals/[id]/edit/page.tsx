@@ -136,8 +136,8 @@ export default function EditProposalPage() {
     if (!form.departmentId) {
       toast.error(
         availableDepartments.length === 0
-          ? "Tài khoản chưa được gán phòng ban"
-          : "Vui lòng chọn phòng ban",
+          ? "Tài khoản chưa được gán dự án"
+          : "Vui lòng chọn dự án",
       );
       return;
     }
@@ -247,7 +247,7 @@ export default function EditProposalPage() {
           </label>
           <label className="block text-sm">
             <span className="mb-1 font-medium">
-              Phòng ban <RequiredMark />
+              Dự án <RequiredMark />
             </span>
             <select
               className="w-full rounded-xl border border-border px-3 py-2.5 text-sm"
@@ -260,8 +260,8 @@ export default function EditProposalPage() {
             >
               <option value="">
                 {availableDepartments.length === 0
-                  ? "Chưa được gán phòng ban"
-                  : "Chọn phòng ban"}
+                  ? "Chưa được gán dự án"
+                  : "Chọn dự án"}
               </option>
               {availableDepartments.map((d) => (
                 <option key={d.id} value={d.id}>

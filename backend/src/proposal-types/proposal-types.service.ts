@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ProposalGroup } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -54,5 +54,26 @@ export class ProposalTypesService {
 
   update(id: string, dto: Record<string, unknown>) {
     return this.prisma.proposalType.update({ where: { id }, data: dto });
+  }
+
+  async remove(id: string) {
+    const proposalType = await this.prisma.proposalType.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        _count: { select: { proposals: true } },
+      },
+    });
+    if (!proposalType) {
+      throw new NotFoundException('Không tìm thấy loại đề xuất');
+    }
+    if (proposalType._count.proposals > 0) {
+      throw new BadRequestException(
+        `Loại đề xuất "${proposalType.name}" đã phát sinh dữ liệu. Hãy tạm tắt để giữ lịch sử.`,
+      );
+    }
+    await this.prisma.proposalType.delete({ where: { id } });
+    return { ok: true };
   }
 }

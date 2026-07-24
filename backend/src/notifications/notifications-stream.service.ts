@@ -25,6 +25,16 @@ export class NotificationsStreamService {
     this.getStream(userId).next({ type: 'refresh', data: { refresh: true } });
   }
 
+  broadcastProposalChange(proposalId: string, action: string) {
+    const event: MessageEvent = {
+      type: 'proposal-change',
+      data: { proposalId, action, timestamp: Date.now() },
+    };
+    for (const stream of this.streams.values()) {
+      stream.next(event);
+    }
+  }
+
   private getStream(userId: string) {
     let stream = this.streams.get(userId);
     if (!stream) {

@@ -24,6 +24,7 @@ type UserContextValue = {
 
 const UserContext = createContext<UserContextValue | null>(null);
 const USERS_CACHE_KEY = "finance_users_cache_v1";
+const CURRENT_SESSION_KEY = "finance_current_session_v1";
 
 function normalizeUser(user: User): User {
   const permissions = user.role?.permissions?.length
@@ -71,15 +72,31 @@ function clearCachedUsers() {
   localStorage.removeItem(USERS_CACHE_KEY);
 }
 
+function readCurrentSession(): User | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(CURRENT_SESSION_KEY);
+    return raw ? normalizeUser(JSON.parse(raw) as User) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCurrentSession(user: User) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(CURRENT_SESSION_KEY, JSON.stringify(user));
+}
+
+function clearCurrentSession() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(CURRENT_SESSION_KEY);
+}
+
 function pickUser(list: User[], preferredId?: string | null) {
   const activeUsers = list.filter((user) => user.isActive);
-  return (
-    activeUsers.find((u) => u.id === preferredId) ??
-    activeUsers.find((u) => u.id === getStoredUserId()) ??
-    activeUsers.find((u) => u.email === "nhanvien@sicom.local") ??
-    activeUsers[0] ??
-    null
-  );
+  const storedId = preferredId ?? getStoredUserId();
+  if (!storedId) return null;
+  return activeUsers.find((user) => user.id === storedId) ?? null;
 }
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
@@ -92,9 +109,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const found = pickUser(list, preferredId);
       if (found) {
         setStoredUserId(found.id);
+        writeCurrentSession(found);
         setCurrentUser(found);
       } else {
-        setCurrentUser(null);
+        const storedSession = readCurrentSession();
+        setCurrentUser(storedSession);
       }
     },
     [],
@@ -108,12 +127,21 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [applyUser]);
 
   useEffect(() => {
+    const storedSession = readCurrentSession();
     const cachedUsers = readCachedUsers();
-    const cachedUser = pickUser(cachedUsers, getStoredUserId());
+    const cachedUser =
+      storedSession ?? pickUser(cachedUsers, getStoredUserId());
+    if (storedSession) {
+      setStoredUserId(storedSession.id);
+      setCurrentUser(storedSession);
+      setUsers(cachedUsers.length > 0 ? cachedUsers : [storedSession]);
+      setLoading(false);
+    }
     if (cachedUsers.length > 0) {
       setUsers(cachedUsers);
       if (cachedUser) {
         setStoredUserId(cachedUser.id);
+        writeCurrentSession(cachedUser);
         setCurrentUser(cachedUser);
       }
       setLoading(false);
@@ -133,6 +161,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const login = async (email: string, password: string) => {
     const user = normalizeUser(await apiLogin(email, password));
     setStoredUserId(user.id);
+    writeCurrentSession(user);
     setCurrentUser(user);
     writeCachedUsers([user]);
     try {
@@ -145,6 +174,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const logout = () => {
     clearStoredUserId();
     clearCachedUsers();
+    clearCurrentSession();
     setUsers([]);
     setCurrentUser(null);
   };

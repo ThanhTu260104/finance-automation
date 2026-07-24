@@ -127,6 +127,7 @@ export function ProposalForm() {
     };
   }, []);
 
+
   useEffect(() => {
     setForm((f) => {
       if (availableDepartments.length === 1) {
@@ -189,8 +190,8 @@ export function ProposalForm() {
     if (!form.departmentId) {
       return (
         availableDepartments.length === 0
-          ? "Tài khoản chưa được gán phòng ban"
-          : "Vui lòng chọn phòng ban"
+          ? "Tài khoản chưa được gán dự án"
+          : "Vui lòng chọn dự án"
       );
     }
 
@@ -306,7 +307,7 @@ export function ProposalForm() {
 
               <label className="block text-sm">
                 <span className={labelClass}>
-                  Phòng ban <RequiredMark />
+                  Dự án <RequiredMark />
                 </span>
                 <div className="relative">
                   <select
@@ -320,8 +321,8 @@ export function ProposalForm() {
                   >
                     <option value="">
                       {availableDepartments.length === 0
-                        ? "Chưa được gán phòng ban"
-                        : "Chọn phòng ban"}
+                        ? "Chưa được gán dự án"
+                        : "Chọn dự án"}
                     </option>
                     {availableDepartments.map((d) => (
                       <option key={d.id} value={d.id}>

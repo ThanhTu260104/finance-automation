@@ -4,12 +4,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'crypto';
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { appEnv } from '../config/app-env';
 import { PrismaService } from '../prisma/prisma.service';
 import { deriveLegacyRoleFlags } from '../roles/role-permissions';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AccountEmailService } from './account-email.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 const userInclude = {
   department: true,
@@ -18,6 +22,9 @@ const userInclude = {
   },
   role: true,
 } as const;
+
+const AVATAR_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const MAX_AVATAR_BYTES = 3 * 1024 * 1024;
 
 @Injectable()
 export class UsersService {
@@ -79,7 +86,7 @@ export class UsersService {
       select: { id: true },
     });
     if (found.length !== ids.length) {
-      throw new BadRequestException('Phòng ban không hợp lệ');
+      throw new BadRequestException('Dự án không hợp lệ');
     }
     return ids;
   }
@@ -104,6 +111,7 @@ export class UsersService {
       data: {
         email: dto.email,
         fullName: dto.fullName,
+        phone: dto.phone?.trim() || null,
         passwordHash,
         roleId: role.id,
         departmentId: departmentIds[0] ?? null,
@@ -145,6 +153,9 @@ export class UsersService {
     delete data.departmentId;
     delete data.sendWelcomeEmail;
     delete data.isActive;
+    if (dto.phone !== undefined) {
+      data.phone = dto.phone.trim() || null;
+    }
     if (dto.password) {
       data.passwordHash = await bcrypt.hash(
         dto.password,
@@ -177,6 +188,65 @@ export class UsersService {
     const user = await this.prisma.user.update({
       where: { id },
       data,
+      include: userInclude,
+    });
+    return this.sanitize(user);
+  }
+
+  async uploadAvatar(id: string, file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Chưa chọn ảnh đại diện');
+    if (!AVATAR_MIME_TYPES.has(file.mimetype)) {
+      throw new BadRequestException('Chỉ hỗ trợ ảnh JPG, PNG hoặc WebP');
+    }
+    if (file.size > MAX_AVATAR_BYTES) {
+      throw new BadRequestException('Ảnh đại diện tối đa 3 MB');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('Không tìm thấy nhân viên');
+
+    if (!existsSync(appEnv.avatarUploadDir)) {
+      mkdirSync(appEnv.avatarUploadDir, { recursive: true });
+    }
+
+    const extension =
+      file.mimetype === 'image/png'
+        ? '.png'
+        : file.mimetype === 'image/webp'
+          ? '.webp'
+          : '.jpg';
+    const storedName = `${randomUUID()}${extension}`;
+    writeFileSync(join(appEnv.avatarUploadDir, storedName), file.buffer);
+
+    const avatarUrl = `${appEnv.uploadUrlPrefix}avatars/${storedName}`;
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: { avatarUrl },
+      include: userInclude,
+    });
+
+    if (user.avatarUrl?.startsWith(`${appEnv.uploadUrlPrefix}avatars/`)) {
+      const oldName = user.avatarUrl.split('/').pop();
+      if (oldName) {
+        const oldPath = join(appEnv.avatarUploadDir, oldName);
+        if (existsSync(oldPath)) unlinkSync(oldPath);
+      }
+    }
+
+    return this.sanitize(updated);
+  }
+
+  async updateProfile(id: string, dto: UpdateProfileDto) {
+    if (!id) throw new BadRequestException('Chưa xác định tài khoản đăng nhập');
+    const existing = await this.prisma.user.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Không tìm thấy tài khoản');
+
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: {
+        fullName: dto.fullName.trim(),
+        phone: dto.phone?.trim() || null,
+      },
       include: userInclude,
     });
     return this.sanitize(user);

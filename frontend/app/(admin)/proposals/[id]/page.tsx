@@ -17,6 +17,7 @@ import {
   FileText,
   FolderKanban,
   Landmark,
+  MessageSquare,
   Pencil,
   Send,
   Trash2,
@@ -30,18 +31,22 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ProposalStatusBadge } from "@/components/proposals/ProposalStatusBadge";
 import {
   approveProposal,
+  addProposalComment,
   cancelProposal,
   deleteProposal,
   duplicateProposal,
   getProposal,
+  getProposalComments,
   markProposalPaid,
   rejectProposal,
   submitProposal,
   type Proposal,
+  type ProposalComment,
 } from "@/lib/api/proposals";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils/format";
 import { useUser } from "@/lib/context/UserContext";
 import { ProposalFileReview } from "@/components/proposals/ProposalFileReview";
+import { userAvatarFullUrl } from "@/lib/api/users";
 
 const PARTICIPANT_LABELS: Record<string, string> = {
   WATCHER: "Theo dõi",
@@ -85,14 +90,6 @@ const ACTION_MESSAGES: Record<
     error: "Không thể hủy đề xuất",
   },
 };
-
-function isSeniorWorkflowStep(proposal: Proposal, stepOrder: number) {
-  return (
-    proposal.workflow?.steps.some(
-      (s) => s.stepOrder === stepOrder && s.isSeniorApprover,
-    ) ?? false
-  );
-}
 
 // A small, self-contained info row: icon + label + value.
 // Keeping this as a tiny component keeps the summary grid consistent
@@ -140,6 +137,10 @@ export default function ProposalDetailPage() {
   const [reasonText, setReasonText] = useState("");
   const [reasonError, setReasonError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState<string | null>(null);
+  const [comments, setComments] = useState<ProposalComment[]>([]);
+  const [commentText, setCommentText] = useState("");
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentSending, setCommentSending] = useState(false);
 
   const reload = () =>
     getProposal(params.id).then(setProposal).finally(() => setLoading(false));
@@ -147,6 +148,45 @@ export default function ProposalDetailPage() {
   useEffect(() => {
     reload();
   }, [params.id]);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const nextProposal = await getProposal(params.id);
+        if (!active) return;
+        setProposal(nextProposal);
+        getProposalComments(params.id)
+          .then((rows) => {
+            if (active) setComments(rows);
+          })
+          .catch(() => {});
+      } catch {
+        // Đề xuất có thể vừa bị xóa hoặc tài khoản không còn quyền xem.
+      }
+    };
+    window.addEventListener("finance:proposal-change", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      active = false;
+      window.removeEventListener("finance:proposal-change", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [params.id]);
+
+  useEffect(() => {
+    if (!proposal || !currentUser) return;
+    const allowed =
+      proposal.creator.id === currentUser.id ||
+      proposal.approvalSteps.some((step) => step.approver.id === currentUser.id) ||
+      proposal.participants.some((participant) => participant.user.id === currentUser.id);
+    if (!allowed) return;
+    setCommentsLoading(true);
+    getProposalComments(proposal.id)
+      .then(setComments)
+      .catch(() => setComments([]))
+      .finally(() => setCommentsLoading(false));
+  }, [proposal?.id, currentUser?.id]);
 
   if (loading || !proposal) {
     return (
@@ -162,7 +202,7 @@ export default function ProposalDetailPage() {
       s.approver.id === currentUser?.id &&
       s.status === "PENDING" &&
       (s.stepOrder === proposal.currentStepOrder ||
-        isSeniorWorkflowStep(proposal, s.stepOrder)),
+        s.isSeniorApprover),
   );
 
   const isCreator = proposal.creator.id === currentUser?.id;
@@ -171,6 +211,26 @@ export default function ProposalDetailPage() {
     (participant) =>
       participant.role === "EXECUTOR" && participant.user.id === currentUser?.id,
   );
+  const canComment =
+    proposal.creator.id === currentUser?.id ||
+    proposal.approvalSteps.some((step) => step.approver.id === currentUser?.id) ||
+    proposal.participants.some((participant) => participant.user.id === currentUser?.id);
+
+  const sendComment = async () => {
+    const content = commentText.trim();
+    if (!content || commentSending) return;
+    setCommentSending(true);
+    try {
+      const created = await addProposalComment(proposal.id, content);
+      setComments((current) => [...current, created]);
+      setCommentText("");
+      toast.success("Đã gửi ý kiến và thông báo cho người liên quan");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không thể gửi ý kiến");
+    } finally {
+      setCommentSending(false);
+    }
+  };
   const canMarkPaid =
     ["PENDING_PAYMENT", "APPROVED"].includes(proposal.status) &&
     isPaymentExecutor;
@@ -246,7 +306,7 @@ export default function ProposalDetailPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="max-w-full space-y-4 overflow-hidden">
       <Link
         href="/proposals"
         className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700"
@@ -263,18 +323,18 @@ export default function ProposalDetailPage() {
         action={<ProposalStatusBadge status={proposal.status} />}
       />
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
+      <div className="grid min-w-0 gap-4 sm:gap-6 lg:grid-cols-3">
+        <div className="min-w-0 space-y-4 lg:col-span-2">
           {/* General information */}
           <Card>
             <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-400">
               Thông tin chung
             </h3>
-            <dl className="grid gap-5 sm:grid-cols-2">
+            <dl className="grid min-w-0 gap-4 sm:grid-cols-2 sm:gap-5">
               <InfoRow icon={User} label="Người đề xuất">
                 {proposal.creator.fullName}
               </InfoRow>
-              <InfoRow icon={Building2} label="Phòng ban">
+              <InfoRow icon={Building2} label="Dự án">
                 {proposal.department?.name ?? "—"}
               </InfoRow>
               <InfoRow icon={FolderKanban} label="Dự án">
@@ -327,7 +387,7 @@ export default function ProposalDetailPage() {
               </h3>
 
               {proposal.status === "PAID" && (
-                <div className="mb-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">
+                <div className="mb-5 flex min-w-0 items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-emerald-800 sm:gap-3 sm:px-4">
                   <CheckCircle2 className="mt-0.5 h-5 w-5 flex-none text-emerald-600" />
                   <div className="min-w-0">
                     <p className="text-sm font-semibold">Đã thanh toán</p>
@@ -344,7 +404,7 @@ export default function ProposalDetailPage() {
               )}
 
               {["PENDING_PAYMENT", "APPROVED"].includes(proposal.status) && (
-                <div className="mb-5 flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sky-800">
+                <div className="mb-5 flex min-w-0 items-start gap-2.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-sky-800 sm:gap-3 sm:px-4">
                   <Clock className="mt-0.5 h-5 w-5 flex-none text-sky-600" />
                   <div className="min-w-0">
                     <p className="text-sm font-semibold">Chờ thanh toán</p>
@@ -356,7 +416,7 @@ export default function ProposalDetailPage() {
               )}
 
               {/* Nhóm 1: số tiền + nội dung thanh toán — 2 cột đều nhau */}
-              <dl className="grid gap-5 sm:grid-cols-3">
+              <dl className="grid min-w-0 gap-4 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
                 <InfoRow icon={Wallet} label="Số tiền" emphasis>
                   {proposal.paymentAmount
                     ? formatCurrency(Number(proposal.paymentAmount))
@@ -379,7 +439,7 @@ export default function ProposalDetailPage() {
                 </InfoRow>
               </dl>
               ) : (
-              <dl className="mt-5 grid gap-5 border-t border-border pt-5 sm:grid-cols-3">
+              <dl className="mt-5 grid min-w-0 gap-4 border-t border-border pt-5 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
                 <InfoRow icon={User} label="Chủ tài khoản">
                   {proposal.accountHolder ?? "—"}
                 </InfoRow>
@@ -407,14 +467,14 @@ export default function ProposalDetailPage() {
                 {proposal.participants.map((p) => (
                   <li
                     key={`${p.role}-${p.user.id}`}
-                    className="flex items-center gap-2 text-sm text-slate-600"
+                    className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600"
                   >
                     <span
                       className={`h-1.5 w-1.5 flex-none rounded-full ${
                         PARTICIPANT_DOT[p.role] ?? "bg-slate-400"
                       }`}
                     />
-                    <span className="font-medium text-slate-800">
+                    <span className="min-w-0 break-words font-medium text-slate-800">
                       {p.user.fullName}
                     </span>
                     <span className="text-slate-400">·</span>
@@ -442,7 +502,7 @@ export default function ProposalDetailPage() {
             </Card>
           )}
 
-          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+          <div className="grid grid-cols-1 gap-2 border-t border-border pt-4 min-[390px]:grid-cols-2 sm:flex sm:flex-wrap sm:items-center [&>*]:min-w-0 [&>*]:justify-center">
             {canApprove && (
               <>
                 <button
@@ -570,7 +630,7 @@ export default function ProposalDetailPage() {
                     setActionPending(null);
                   }
                 }}
-                className="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-danger/30 px-4 py-2 text-sm text-danger hover:bg-danger-light disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-danger/30 px-3 py-2 text-sm text-danger hover:bg-danger-light disabled:opacity-60 sm:ml-auto sm:px-4"
               >
                 <Trash2 className="h-4 w-4" />
                 Xóa nháp
@@ -579,8 +639,9 @@ export default function ProposalDetailPage() {
           </div>
         </div>
 
-        {/* Approval workflow timeline */}
-        <Card className="lg:sticky lg:top-24 lg:self-start">
+        {/* Approval workflow timeline and discussion */}
+        <div className="min-w-0 space-y-4 sm:space-y-5 lg:sticky lg:top-24 lg:self-start">
+        <Card>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="font-semibold text-slate-800">Quy trình duyệt</h3>
             {totalSteps > 0 && (
@@ -607,8 +668,8 @@ export default function ProposalDetailPage() {
                 const isCurrent =
                   step.status === "PENDING" &&
                   (step.stepOrder === proposal.currentStepOrder ||
-                    isSeniorWorkflowStep(proposal, step.stepOrder));
-                const senior = isSeniorWorkflowStep(proposal, step.stepOrder);
+                    step.isSeniorApprover);
+                const senior = step.isSeniorApprover;
                 const isLast = idx === proposal.approvalSteps.length - 1;
 
                 const StatusIcon =
@@ -647,21 +708,24 @@ export default function ProposalDetailPage() {
                           : ""
                       }`}
                     >
-                      <p className="font-medium text-slate-800">
-                        Bước {step.stepOrder} · {step.approver.fullName}
-                      </p>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                        <span className="text-xs text-slate-500">
-                          {step.status}
-                        </span>
-                        {senior && (
-                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
-                            Duyệt cấp cao
-                          </span>
-                        )}
+                      <div className="flex items-center gap-2.5">
+                        <ApproverAvatar name={step.approver.fullName} avatarUrl={step.approver.avatarUrl} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-slate-800">
+                            Bước {step.stepOrder} · {step.approver.fullName}
+                          </p>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs text-slate-500">{step.status}</span>
+                            {senior && (
+                              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                                Duyệt cấp cao
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                       {step.comment && (
-                        <p className="mt-1.5 rounded-lg bg-slate-50 px-2 py-1.5 text-xs text-slate-600">
+                        <p className="mt-1.5 break-words rounded-lg bg-slate-50 px-2 py-1.5 text-xs text-slate-600">
                           {step.comment}
                         </p>
                       )}
@@ -677,11 +741,97 @@ export default function ProposalDetailPage() {
             )}
           </ol>
         </Card>
+        {canComment && (
+          <Card>
+            <div className="mb-4 flex min-w-0 items-start justify-between gap-3">
+              <div>
+                <h3 className="flex items-center gap-2 font-semibold text-slate-800">
+                  <MessageSquare className="h-4 w-4 text-primary-600" />
+                  Ý kiến trao đổi
+                </h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Yêu cầu bổ sung hồ sơ hoặc phản hồi mà không cần từ chối đề xuất.
+                </p>
+              </div>
+              {comments.length > 0 && (
+                <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">
+                  {comments.length}
+                </span>
+              )}
+            </div>
+
+            <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
+              {commentsLoading ? (
+                <div className="py-5 text-center text-sm text-slate-400">Đang tải ý kiến...</div>
+              ) : comments.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-sm text-slate-400">
+                  Chưa có ý kiến trao đổi
+                </div>
+              ) : (
+                comments.map((item) => {
+                  const mine = item.author.id === currentUser?.id;
+                  return (
+                    <div key={item.id} className={`flex gap-2.5 ${mine ? "flex-row-reverse" : ""}`}>
+                      <ApproverAvatar
+                        name={item.author.fullName}
+                        avatarUrl={item.author.avatarUrl}
+                      />
+                      <div className={`min-w-0 max-w-[calc(100%-2.75rem)] sm:max-w-[85%] ${mine ? "text-right" : ""}`}>
+                        <div
+                          className={`break-words rounded-2xl px-3 py-2 text-left text-sm leading-5 ${
+                            mine
+                              ? "rounded-tr-md bg-primary-600 text-white"
+                              : "rounded-tl-md bg-slate-100 text-slate-700"
+                          }`}
+                        >
+                          {item.content}
+                        </div>
+                        <p className="mt-1 break-words px-1 text-[11px] text-slate-400">
+                          {item.author.fullName} · {formatDateTime(item.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="mt-4 border-t border-border pt-4">
+              <textarea
+                rows={3}
+                maxLength={2000}
+                value={commentText}
+                onChange={(event) => setCommentText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    sendComment();
+                  }
+                }}
+                placeholder="Nhập ý kiến hoặc nội dung cần bổ sung..."
+                className="w-full resize-none rounded-xl border border-border px-3 py-2.5 text-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+              />
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                <span className="text-xs text-slate-400">Enter để gửi · Shift + Enter để xuống dòng</span>
+                <button
+                  type="button"
+                  disabled={!commentText.trim() || commentSending}
+                  onClick={sendComment}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50 sm:w-auto"
+                >
+                  <Send className="h-4 w-4" />
+                  {commentSending ? "Đang gửi..." : "Gửi ý kiến"}
+                </button>
+              </div>
+            </div>
+          </Card>
+        )}
+        </div>
       </div>
 
       {reasonModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-2 sm:px-4">
+          <div className="max-h-[94vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4 shadow-xl sm:p-5">
             <div className="mb-4">
               <h2 className="text-base font-semibold text-slate-800">
                 {reasonModal === "reject"
@@ -748,5 +898,16 @@ export default function ProposalDetailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function ApproverAvatar({ name, avatarUrl }: { name: string; avatarUrl?: string | null }) {
+  const fullUrl = userAvatarFullUrl(avatarUrl);
+  const initials = name.trim().split(/\s+/).slice(-2).map((part) => part[0]?.toUpperCase()).join("") || "?";
+
+  return fullUrl ? (
+    <img src={fullUrl} alt={`Ảnh ${name}`} className="h-10 w-10 shrink-0 rounded-full border border-slate-200 object-cover" />
+  ) : (
+    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700">{initials}</span>
   );
 }

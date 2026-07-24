@@ -9,10 +9,12 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import * as bcrypt from 'bcrypt';
 import 'dotenv/config';
+import { resolveDatabaseUrl } from '../src/config/database-url';
 
 const ALL_PERMISSIONS = [
   'dashboard.view',
   'proposal.view',
+  'proposal.view_all',
   'proposal.create',
   'proposal.approve',
   'proposal.pay',
@@ -24,7 +26,7 @@ const ALL_PERMISSIONS = [
   'workflow.manage',
 ];
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({ connectionString: resolveDatabaseUrl() });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 const SALT_ROUNDS = Number(process.env.BCRYPT_SALT_ROUNDS ?? 10);

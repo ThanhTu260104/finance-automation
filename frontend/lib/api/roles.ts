@@ -51,3 +51,7 @@ export async function updateRole(
   const { data } = await api.patch<Role>(`/roles/${id}`, payload);
   return data;
 }
+
+export async function deleteRole(id: string): Promise<void> {
+  await api.delete(`/roles/${id}`);
+}

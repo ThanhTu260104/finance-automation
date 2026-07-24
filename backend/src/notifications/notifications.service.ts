@@ -120,6 +120,7 @@ export class NotificationsService {
             approverId: true,
             stepOrder: true,
             status: true,
+            isSeniorApprover: true,
           },
         },
         participants: {
@@ -160,7 +161,7 @@ export class NotificationsService {
               step.status === ApprovalStepStatus.PENDING &&
               (!proposal.workflow?.isSequential ||
                 step.stepOrder === proposal.currentStepOrder ||
-                this.isSeniorWorkflowStep(proposal.workflow, step.stepOrder)),
+                step.isSeniorApprover),
           );
         if (!shouldShow) staleIds.push(row.id);
         return shouldShow;

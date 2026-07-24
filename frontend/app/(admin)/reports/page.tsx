@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import html2canvas from "html2canvas-pro";
+import jsPDF from "jspdf";
 import {
   BarChart3,
   Building2,
@@ -11,6 +13,8 @@ import {
   CreditCard,
   ReceiptText,
   Wallet,
+  Download,
+  Loader2,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -93,6 +97,7 @@ function StatCard({
 }
 
 export default function ReportsPage() {
+  const reportRef = useRef<HTMLDivElement>(null);
   const [departments, setDepartments] = useState<Array<{ id: string; name: string }>>([]);
   const [departmentId, setDepartmentId] = useState("");
   const [period, setPeriod] = useState<DashboardPeriod>("month");
@@ -105,6 +110,32 @@ export default function ReportsPage() {
   const [report, setReport] = useState<DepartmentReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [realtimeVersion, setRealtimeVersion] = useState(0);
+
+  const exportPdf = async () => {
+    if (!reportRef.current) return;
+    setExporting(true);
+    try {
+      const canvas = await html2canvas(reportRef.current, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imageHeight = (canvas.height * pageWidth) / canvas.width;
+      const image = canvas.toDataURL("image/png");
+      let position = 0;
+      pdf.addImage(image, "PNG", 0, position, pageWidth, imageHeight);
+      let remaining = imageHeight - pageHeight;
+      while (remaining > 0) {
+        position -= pageHeight;
+        pdf.addPage();
+        pdf.addImage(image, "PNG", 0, position, pageWidth, imageHeight);
+        remaining -= pageHeight;
+      }
+      pdf.save(`bao-cao-${period}-${period === "month" ? selectedMonth : selectedWeekDate}.pdf`);
+    } catch (error) { setError(error instanceof Error ? error.message : "Không thể xuất PDF"); }
+    finally { setExporting(false); }
+  };
 
   const params = useMemo(
     () => ({
@@ -114,11 +145,16 @@ export default function ReportsPage() {
     }),
     [departmentId, period, selectedMonth, selectedWeekDate],
   );
-  const periodLabel = period === "month" ? "tháng đã chọn" : "tuần đã chọn";
+  const periodLabel =
+    period === "day"
+      ? "ngày đã chọn"
+      : period === "week"
+        ? "tuần đã chọn"
+        : "tháng đã chọn";
 
   const selectedDepartmentName =
     departments.find((department) => department.id === departmentId)?.name ??
-    "Tất cả phòng ban";
+    "Tất cả dự án được phép xem";
 
   useEffect(() => {
     let cancelled = false;
@@ -149,7 +185,17 @@ export default function ReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [params]);
+  }, [params, realtimeVersion]);
+
+  useEffect(() => {
+    const refresh = () => setRealtimeVersion((value) => value + 1);
+    window.addEventListener("finance:proposal-change", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("finance:proposal-change", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
 
   const summary = report?.summary;
   const stats = [
@@ -205,8 +251,11 @@ export default function ReportsPage() {
     <div>
       <PageHeader
         title="Báo cáo"
-        description="Báo cáo theo phòng ban, kỳ tuần hoặc tháng"
+        description="Báo cáo theo dự án và kỳ ngày, tuần hoặc tháng"
+        action={<button type="button" onClick={exportPdf} disabled={exporting || loading} className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60">{exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}{exporting ? "Đang xuất..." : "Xuất PDF có biểu đồ"}</button>}
       />
+
+      <div ref={reportRef} className="bg-white">
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {stats.map((item) => (
@@ -219,14 +268,14 @@ export default function ReportsPage() {
           <label className="block">
             <span className="mb-1 flex items-center gap-2 text-sm font-medium text-slate-700">
               <Building2 className="h-4 w-4 text-primary-600" />
-              Phòng ban
+              Dự án
             </span>
             <select
               value={departmentId}
               onChange={(event) => setDepartmentId(event.target.value)}
               className="w-full rounded-lg border border-border px-3 py-2 text-sm text-slate-700 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30"
             >
-              <option value="">Tất cả phòng ban</option>
+              <option value="">Tất cả dự án được phép xem</option>
               {departments.map((department) => (
                 <option key={department.id} value={department.id}>
                   {department.name}
@@ -240,19 +289,23 @@ export default function ReportsPage() {
               <CalendarDays className="h-4 w-4 text-primary-600" />
               Kỳ báo cáo
             </span>
-            <div className="inline-flex rounded-lg bg-surface-muted p-1">
-              {(["week", "month"] as DashboardPeriod[]).map((item) => (
+            <div className="flex w-full rounded-lg bg-surface-muted p-1 sm:inline-flex sm:w-auto">
+              {(["day", "week", "month"] as DashboardPeriod[]).map((item) => (
                 <button
                   key={item}
                   type="button"
                   onClick={() => setPeriod(item)}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition sm:flex-none ${
                     period === item
                       ? "bg-white text-primary-700 shadow-sm"
                       : "text-slate-500 hover:text-slate-700"
                   }`}
                 >
-                  {item === "week" ? "Theo tuần" : "Theo tháng"}
+                  {item === "day"
+                    ? "Theo ngày"
+                    : item === "week"
+                      ? "Theo tuần"
+                      : "Theo tháng"}
                 </button>
               ))}
             </div>
@@ -263,14 +316,14 @@ export default function ReportsPage() {
               type="month"
               value={selectedMonth}
               onChange={(event) => setSelectedMonth(event.target.value)}
-              className="rounded-lg border border-border px-3 py-2 text-sm text-slate-700 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30"
+              className="w-full rounded-lg border border-border px-3 py-2 text-sm text-slate-700 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30 lg:w-auto"
             />
           ) : (
             <input
               type="date"
               value={selectedWeekDate}
               onChange={(event) => setSelectedWeekDate(event.target.value)}
-              className="rounded-lg border border-border px-3 py-2 text-sm text-slate-700 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30"
+              className="w-full rounded-lg border border-border px-3 py-2 text-sm text-slate-700 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30 lg:w-auto"
             />
           )}
         </div>
@@ -301,7 +354,16 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:hidden">
+          {monthlyPaid.map((item) => (
+            <div key={item.month} className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
+              <p className="text-xs font-medium text-slate-400">Tháng {item.month}</p>
+              <p className="mt-1 truncate text-sm font-semibold text-slate-800">{formatCurrency(item.amount)}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="hidden overflow-x-auto md:block">
           <div className="flex min-w-[780px] items-end gap-3 border-b border-slate-200 px-2 pb-4 pt-8">
             {monthlyPaid.map((item) => {
               const height = Math.max(
@@ -330,7 +392,7 @@ export default function ReportsPage() {
         </div>
       </Card>
 
-      <Card padding="sm" className="overflow-x-auto">
+      <Card padding="sm">
         <div className="mb-3 flex items-center justify-between">
           <div>
             <h2 className="font-semibold text-slate-800">Các đề xuất</h2>
@@ -341,12 +403,35 @@ export default function ReportsPage() {
           {loading && <span className="text-xs text-slate-400">Đang tải...</span>}
         </div>
 
+        <div className="space-y-3 md:hidden">
+          {(report?.proposals.length ?? 0) === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">Chưa có đề xuất trong kỳ này</p>
+          ) : report?.proposals.map((proposal) => (
+            <Link key={proposal.id} href={`/proposals/${proposal.id}`} className="block rounded-xl border border-border p-3.5 active:bg-slate-50">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="line-clamp-2 font-semibold text-slate-800">{proposal.title}</p>
+                  <p className="mt-0.5 text-xs text-slate-400">{proposal.code} · {proposal.proposalType.name}</p>
+                </div>
+                <ProposalStatusBadge status={proposal.status as never} />
+              </div>
+              <div className="mt-3 grid gap-1.5 border-t border-slate-100 pt-3 text-xs">
+                <div className="flex justify-between gap-3"><span className="text-slate-400">Người tạo</span><span className="truncate font-medium text-slate-600">{proposal.creator.fullName}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-slate-400">Dự án</span><span className="truncate text-slate-600">{proposal.department?.name || "—"}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-slate-400">Ngày tạo</span><span className="text-slate-600">{formatDateTime(proposal.createdAt)}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-slate-400">Số tiền</span><span className="font-semibold text-slate-800">{proposal.paymentAmount ? formatCurrency(Number(proposal.paymentAmount)) : "—"}</span></div>
+              </div>
+            </Link>
+          ))}
+        </div>
+
+        <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[920px] text-sm">
           <thead className="text-left text-xs uppercase tracking-wide text-slate-400">
             <tr>
               <th className="px-3 py-3 font-medium">Mã</th>
               <th className="px-3 py-3 font-medium">Tên đề xuất</th>
-              <th className="px-3 py-3 font-medium">Phòng ban</th>
+              <th className="px-3 py-3 font-medium">Dự án</th>
               <th className="px-3 py-3 font-medium">Người tạo</th>
               <th className="px-3 py-3 font-medium">Ngày tạo</th>
               <th className="px-3 py-3 text-right font-medium">Số tiền</th>
@@ -399,7 +484,9 @@ export default function ReportsPage() {
             )}
           </tbody>
         </table>
+        </div>
       </Card>
+      </div>
     </div>
   );
 }

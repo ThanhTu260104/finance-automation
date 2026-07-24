@@ -1,6 +1,7 @@
 export const ROLE_PERMISSIONS = [
   'dashboard.view',
   'proposal.view',
+  'proposal.view_all',
   'proposal.create',
   'proposal.approve',
   'proposal.pay',

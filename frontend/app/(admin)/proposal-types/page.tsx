@@ -6,18 +6,17 @@ import { toast } from "sonner";
 import {
   BadgeCheck,
   CircleOff,
-  Landmark,
   Loader2,
   Pencil,
   Plus,
-  ShoppingCart,
-  Tags,
+  Trash2,
   X,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   createProposalType,
+  deleteProposalType,
   getProposalTypes,
   updateProposalType,
   type ProposalGroup,
@@ -42,17 +41,15 @@ const EMPTY_FORM: ProposalTypeForm = {
 
 const GROUP_META: Record<
   ProposalGroup,
-  { label: string; description: string; icon: React.ComponentType<{ className?: string }> }
+  { label: string; description: string }
 > = {
   FINANCE: {
     label: "Tài chính - Kế toán",
     description: "Các đề xuất thanh toán, tạm ứng, hoàn ứng, chi phí vận hành.",
-    icon: Landmark,
   },
   PROCUREMENT: {
     label: "Mua sắm",
     description: "Các đề xuất mua hàng, thiết bị, dịch vụ hoặc vật tư.",
-    icon: ShoppingCart,
   },
 };
 
@@ -65,6 +62,7 @@ export default function ProposalTypesPage() {
   const [saving, setSaving] = useState(false);
   const [statusTarget, setStatusTarget] = useState<ProposalType | null>(null);
   const [statusSaving, setStatusSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -193,6 +191,25 @@ export default function ProposalTypesPage() {
     }
   };
 
+  const handleDelete = async (type: ProposalType) => {
+    if (!window.confirm(`Xóa vĩnh viễn loại đề xuất “${type.name}”? Các cấu hình quy trình của loại này cũng sẽ bị xóa.`)) {
+      return;
+    }
+    setDeletingId(type.id);
+    const toastId = toast.loading("Đang xóa loại đề xuất...");
+    try {
+      await deleteProposalType(type.id);
+      toast.success("Đã xóa loại đề xuất", { id: toastId });
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không thể xóa loại đề xuất", {
+        id: toastId,
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -210,11 +227,11 @@ export default function ProposalTypesPage() {
         }
       />
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard icon={Tags} label="Tổng loại" value={stats.total} />
-        <SummaryCard icon={BadgeCheck} label="Đang hoạt động" value={stats.active} tone="emerald" />
-        <SummaryCard icon={Landmark} label="Tài chính" value={stats.finance} tone="sky" />
-        <SummaryCard icon={ShoppingCart} label="Mua sắm" value={stats.procurement} tone="amber" />
+      <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-border bg-white px-4 py-3 text-sm">
+        <span className="font-semibold text-slate-700">{stats.total} loại đề xuất</span>
+        <span className="text-emerald-700">{stats.active} đang hoạt động</span>
+        <span className="text-slate-500">Tài chính: {stats.finance}</span>
+        <span className="text-slate-500">Mua sắm: {stats.procurement}</span>
       </div>
 
       {loading ? (
@@ -225,89 +242,100 @@ export default function ProposalTypesPage() {
           </div>
         </Card>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-2">
-          {(["FINANCE", "PROCUREMENT"] as ProposalGroup[]).map((group) => {
-            const meta = GROUP_META[group];
-            const Icon = meta.icon;
-            const rows = types
-              .filter((type) => type.group === group)
-              .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-
-            return (
-              <Card key={group} padding="sm">
-                <div className="mb-4 flex items-start justify-between gap-3">
-                  <div className="flex gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600">
-                      <Icon className="h-5 w-5" />
+        <Card padding="sm" className="overflow-x-auto">
+          {types.length === 0 ? (
+            <div className="py-12 text-center text-sm text-slate-400">
+              Chưa có loại đề xuất
+            </div>
+          ) : (
+            <>
+            <div className="space-y-3 p-2 sm:hidden">
+              {[...types]
+                .sort(
+                  (a, b) =>
+                    a.group.localeCompare(b.group) ||
+                    (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
+                )
+                .map((type) => (
+                  <article key={type.id} className={`rounded-xl border border-border p-3 ${type.isActive ? "bg-white" : "bg-slate-50"}`}>
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="break-words font-semibold text-slate-800">{type.name}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">{GROUP_META[type.group].label} · Thứ tự {type.sortOrder ?? 0}</p>
+                      </div>
+                      <StatusToggleButton active={type.isActive} onClick={() => setStatusTarget(type)} />
                     </div>
-                    <div>
-                      <h2 className="font-semibold text-slate-800">{meta.label}</h2>
-                      <p className="mt-0.5 text-sm text-slate-500">{meta.description}</p>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <button type="button" onClick={() => openEdit(type)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-slate-600"><Pencil className="h-4 w-4" />Sửa</button>
+                      <button type="button" disabled={deletingId === type.id} onClick={() => handleDelete(type)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-600">{deletingId === type.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}Xóa</button>
                     </div>
-                  </div>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
-                    {rows.length} loại
-                  </span>
-                </div>
-
-                {rows.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-slate-400">
-                    Chưa có loại đề xuất trong nhóm này
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {rows.map((type) => (
-                      <div
-                        key={type.id}
-                        className={`grid gap-3 rounded-2xl border px-4 py-3.5 transition sm:grid-cols-[1fr_auto] ${
-                          type.isActive
-                            ? "border-border bg-white hover:border-primary-200 hover:bg-primary-50/30"
-                            : "border-slate-200 bg-slate-50/80"
-                        }`}
-                      >
-                        <div className="flex min-w-0 items-center gap-3">
-                          <div
-                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                              type.isActive
-                                ? "bg-primary-50 text-primary-600"
-                                : "bg-slate-200 text-slate-500"
-                            }`}
-                          >
-                            <Tags className="h-5 w-5" />
-                          </div>
-                          <div className="min-w-0">
-                            <h3 className="truncate font-semibold text-slate-800">
-                              {type.name}
-                            </h3>
-                            <p className="mt-0.5 text-sm text-slate-500">
-                              {type.isActive
-                                ? "Đang dùng khi tạo đề xuất"
-                                : "Đã tạm tắt, người dùng không chọn được"}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                          <StatusToggleButton
-                            active={type.isActive}
-                            onClick={() => setStatusTarget(type)}
-                          />
+                  </article>
+                ))}
+            </div>
+            <table className="hidden w-full min-w-[760px] text-sm sm:table">
+              <thead className="border-b border-border text-left text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Tên loại đề xuất</th>
+                  <th className="px-4 py-3 font-medium">Nhóm</th>
+                  <th className="w-20 px-4 py-3 text-center font-medium">Thứ tự</th>
+                  <th className="px-4 py-3 font-medium">Trạng thái</th>
+                  <th className="px-4 py-3 text-right font-medium">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {[...types]
+                  .sort(
+                    (a, b) =>
+                      a.group.localeCompare(b.group) ||
+                      (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
+                  )
+                  .map((type) => (
+                    <tr
+                      key={type.id}
+                      className={type.isActive ? "hover:bg-primary-50/40" : "bg-slate-50/80"}
+                    >
+                      <td className="px-4 py-3 font-semibold text-slate-800">{type.name}</td>
+                      <td className="px-4 py-3 text-slate-600">{GROUP_META[type.group].label}</td>
+                      <td className="px-4 py-3 text-center text-slate-500">{type.sortOrder ?? 0}</td>
+                      <td className="px-4 py-3">
+                        <StatusToggleButton
+                          active={type.isActive}
+                          onClick={() => setStatusTarget(type)}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => openEdit(type)}
-                            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-slate-600 transition hover:border-primary-300 hover:text-primary-700"
+                            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border px-3 font-medium text-slate-600 transition hover:border-primary-300 hover:text-primary-700"
                           >
                             <Pencil className="h-4 w-4" />
                             Sửa
                           </button>
+                          <button
+                            type="button"
+                            disabled={deletingId === type.id}
+                            onClick={() => handleDelete(type)}
+                            title="Xóa loại đề xuất"
+                            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-red-200 px-3 font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                          >
+                            {deletingId === type.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                            Xóa
+                          </button>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+            </>
+          )}
+        </Card>
       )}
 
       {showForm &&
@@ -315,8 +343,8 @@ export default function ProposalTypesPage() {
         createPortal(
           <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={closeModal} />
-            <div className="relative z-[100000] w-full max-w-xl rounded-2xl bg-white shadow-2xl">
-              <div className="flex items-center justify-between border-b border-border px-6 py-4">
+            <div className="relative z-[100000] max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b border-border px-4 py-4 sm:px-6">
                 <div>
                   <h3 className="text-lg font-semibold text-slate-800">
                     {editingId ? "Sửa loại đề xuất" : "Tạo loại đề xuất"}
@@ -335,7 +363,7 @@ export default function ProposalTypesPage() {
                 </button>
               </div>
 
-              <div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
+              <div className="grid gap-4 px-4 py-5 sm:grid-cols-2 sm:px-6">
                 <Label text="Tên loại">
                   <input
                     value={form.name}
@@ -373,7 +401,7 @@ export default function ProposalTypesPage() {
                 </label>
               </div>
 
-              <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
+              <div className="flex justify-end gap-2 border-t border-border px-4 py-4 sm:px-6">
                 <button
                   type="button"
                   disabled={saving}
@@ -506,36 +534,5 @@ function StatusToggleButton({
       <Icon className="h-4 w-4" />
       {active ? "Đang hoạt động" : "Tạm tắt"}
     </button>
-  );
-}
-
-function SummaryCard({
-  icon: Icon,
-  label,
-  value,
-  tone = "primary",
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: number;
-  tone?: "primary" | "emerald" | "sky" | "amber";
-}) {
-  const toneClass = {
-    primary: "bg-primary-50 text-primary-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    sky: "bg-sky-50 text-sky-600",
-    amber: "bg-amber-50 text-amber-600",
-  }[tone];
-
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-white px-4 py-3.5">
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${toneClass}`}>
-        <Icon className="h-5 w-5" />
-      </div>
-      <div>
-        <p className="text-xl font-semibold leading-tight text-slate-800">{value}</p>
-        <p className="text-xs text-slate-400">{label}</p>
-      </div>
-    </div>
   );
 }

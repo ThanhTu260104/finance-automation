@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { DepartmentsService } from './departments.service';
 import { CreateDepartmentDto } from './dto/create-department.dto';
@@ -10,8 +10,8 @@ export class DepartmentsController {
   constructor(private readonly departmentsService: DepartmentsService) {}
 
   @Get()
-  findAll() {
-    return this.departmentsService.findAll();
+  findAll(@Query('includeInactive') includeInactive?: string) {
+    return this.departmentsService.findAll(includeInactive === 'true');
   }
 
   @Post()
@@ -21,6 +21,11 @@ export class DepartmentsController {
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateDepartmentDto) {
-    return this.departmentsService.update(id, dto as any);
+    return this.departmentsService.update(id, dto);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.departmentsService.remove(id);
   }
 }
