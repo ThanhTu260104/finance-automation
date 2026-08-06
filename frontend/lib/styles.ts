@@ -1,4 +1,4 @@
-export const card = "rounded-2xl border border-border bg-surface shadow-sm";
+export const card = "rounded-2xl border border-border/70 bg-surface shadow-sm";
 
 export const pageTitle = "text-2xl font-bold text-slate-800";
 export const pageSubtitle = "text-sm text-slate-500";

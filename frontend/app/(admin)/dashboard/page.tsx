@@ -297,9 +297,18 @@ export default function DashboardPage() {
           <Card
             key={item.label}
             padding="sm"
+            role={item.highlight ? "button" : undefined}
+            tabIndex={item.highlight ? 0 : undefined}
+            onClick={item.highlight ? () => document.getElementById("pending-approvals")?.scrollIntoView({ behavior: "smooth", block: "start" }) : undefined}
+            onKeyDown={item.highlight ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                document.getElementById("pending-approvals")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }
+            } : undefined}
             className={
               item.highlight
-                ? "border-amber-200 bg-amber-50/30"
+                ? "cursor-pointer border-amber-200 bg-amber-50/30 transition hover:bg-amber-50 focus:outline-none focus:ring-2 focus:ring-amber-300"
                 : undefined
             }
           >
@@ -323,7 +332,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Card id="pending-approvals" className="scroll-mt-24">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="flex items-center gap-2 font-semibold text-slate-800">
               <Inbox className="h-4 w-4 text-amber-500" />

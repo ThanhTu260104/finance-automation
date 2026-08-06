@@ -146,6 +146,7 @@ export class ProposalsService {
         id: true,
         title: true,
         creatorId: true,
+        departmentId: true,
         approvalSteps: { select: { approverId: true } },
         participants: { select: { userId: true } },
         comments: { select: { authorId: true } },
@@ -158,6 +159,19 @@ export class ProposalsService {
       ...proposal.approvalSteps.map((step) => step.approverId),
       ...proposal.participants.map((participant) => participant.userId),
     ]);
+    if (proposal.departmentId) {
+      const projectMembers = await this.prisma.user.findMany({
+        where: {
+          isActive: true,
+          OR: [
+            { departmentId: proposal.departmentId },
+            { departmentMemberships: { some: { departmentId: proposal.departmentId } } },
+          ],
+        },
+        select: { id: true },
+      });
+      projectMembers.forEach((member) => memberIds.add(member.id));
+    }
     if (!memberIds.has(userId)) {
       throw new ForbiddenException('Bạn không thuộc luồng trao đổi của đề xuất này');
     }
@@ -1243,6 +1257,32 @@ export class ProposalsService {
     }
 
     return updated;
+  }
+
+  private async notifySelectedRecipients(proposal: {
+    id: string;
+    title: string;
+    participants: Array<{ userId: string; role: ParticipantRole }>;
+  }) {
+    const recipientIds = Array.from(
+      new Set(
+        proposal.participants
+          .filter((participant) => participant.role === ParticipantRole.NOTIFY)
+          .map((participant) => participant.userId),
+      ),
+    );
+    await Promise.all(
+      recipientIds.map((recipientId) =>
+        this.notifications.create(undefined, {
+          userId: recipientId,
+          type: NotificationType.INFO,
+          title: 'Bạn được thêm vào đề xuất',
+          message: `Bạn được chọn nhận thông báo cho đề xuất "${proposal.title}".`,
+          link: `/proposals/${proposal.id}`,
+          payload: { proposalId: proposal.id },
+        }),
+      ),
+    );
   }
 
   async markPaid(id: string, rawUserId: string) {

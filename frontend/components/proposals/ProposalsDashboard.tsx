@@ -788,8 +788,16 @@ export function ProposalsDashboard({
 
       {statCards.length > 0 && (
         <div className="mb-5 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          {statCards.map((item) => (
-            <StatCard key={item.label} {...item} />
+          {statCards.map((item, index) => (
+            <StatCard
+              key={item.label}
+              {...item}
+              onClick={index === statCards.length - 1 ? () => {
+                setView("approve");
+                setStatusFilter("");
+                window.setTimeout(() => document.getElementById("proposal-list-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+              } : undefined}
+            />
           ))}
         </div>
       )}
@@ -800,7 +808,7 @@ export function ProposalsDashboard({
         </Card>
       )}
 
-      <Card className="mb-4" padding="sm">
+      <Card id="proposal-list-section" className="mb-4 scroll-mt-24" padding="sm">
         <div className="inline-flex flex-wrap gap-1 rounded-xl bg-surface-muted p-1">
           {PROPOSAL_VIEW_TABS.map((tab) => (
             <button
@@ -1348,11 +1356,13 @@ function StatCard({
   value,
   icon: Icon,
   tone,
+  onClick,
 }: {
   label: string;
   value: number;
   icon: React.ComponentType<{ className?: string }>;
   tone: "primary" | "amber" | "emerald" | "rose" | "sky";
+  onClick?: () => void;
 }) {
   const toneClass = {
     primary: "bg-primary-50 text-primary-600",
@@ -1363,7 +1373,7 @@ function StatCard({
   }[tone];
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-white px-4 py-3.5">
+    <button type="button" onClick={onClick} disabled={!onClick} className={cn("flex w-full items-center gap-3 rounded-xl border border-border bg-white px-4 py-3.5 text-left", onClick ? "cursor-pointer transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-primary-300" : "cursor-default")}>
       <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${toneClass}`}>
         <Icon className="h-5 w-5" />
       </div>
@@ -1371,6 +1381,6 @@ function StatCard({
         <p className="text-xl font-semibold leading-tight text-slate-800">{value}</p>
         <p className="truncate text-xs text-slate-400">{label}</p>
       </div>
-    </div>
+    </button>
   );
 }

@@ -14,6 +14,7 @@ import {
   DocxPreview,
 } from "@/components/proposals/DocxPreview";
 import { cn } from "@/lib/utils/cn";
+import { PdfPreview } from "@/components/proposals/PdfPreview";
 
 const KIND_LABELS: Record<string, string> = {
   CONTRACT: "Hợp đồng / Báo giá",
@@ -189,11 +190,7 @@ export function ProposalFileReview({
                 />
               </div>
             ) : isPdf(active.mimeType) ? (
-              <iframe
-                title={active.name}
-                src={active.url}
-                className="h-[min(70vh,560px)] w-full bg-white"
-              />
+              <PdfPreview url={active.url} file={active.file} className="h-[min(70vh,560px)]" />
             ) : canPreviewDocx(active.mimeType, active.name) ? (
               <DocxPreview
                 url={active.url}
@@ -275,11 +272,7 @@ export function ProposalFileReview({
                       />
                     </div>
                   ) : isPdf(previewModalItem.mimeType) ? (
-                    <iframe
-                      title={previewModalItem.name}
-                      src={previewModalItem.url}
-                      className="h-full w-full bg-white"
-                    />
+                    <PdfPreview url={previewModalItem.url} file={previewModalItem.file} className="h-full" />
                   ) : canPreviewDocx(previewModalItem.mimeType, previewModalItem.name) ? (
                     <DocxPreview
                       url={previewModalItem.url}

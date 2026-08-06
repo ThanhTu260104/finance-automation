@@ -17,6 +17,7 @@ import { UsersService } from './users.service';
 import { CurrentUserId } from '../common/decorators/current-user.decorator';
 import { SetUserStatusDto } from './dto/set-user-status.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @ApiTags('users')
 @Controller('users')
@@ -49,6 +50,14 @@ export class UsersController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.usersService.updateProfile(currentUserId, dto);
+  }
+
+  @Patch('me/password')
+  changeMyPassword(
+    @CurrentUserId() currentUserId: string,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.usersService.changePassword(currentUserId, dto);
   }
 
   @Post('me/avatar')

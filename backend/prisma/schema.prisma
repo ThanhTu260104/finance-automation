@@ -156,8 +156,23 @@ model User {
   updatedAt             DateTime                      @updatedAt @map("updated_at")
   notifications         Notification[]
   pushSubscriptions     PushSubscription[]
+  passwordResetCodes    PasswordResetCode[]
 
   @@map("users")
+}
+
+model PasswordResetCode {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String   @map("code_hash")
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("password_reset_codes")
 }
 
 model UserDepartment {

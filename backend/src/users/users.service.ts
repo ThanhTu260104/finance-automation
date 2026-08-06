@@ -14,6 +14,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AccountEmailService } from './account-email.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 const userInclude = {
   department: true,
@@ -250,6 +251,28 @@ export class UsersService {
       include: userInclude,
     });
     return this.sanitize(user);
+  }
+
+  async changePassword(id: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user?.isActive || !user.passwordHash) {
+      throw new BadRequestException('Tài khoản không thể đổi mật khẩu');
+    }
+    const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!valid) throw new BadRequestException('Mật khẩu hiện tại không đúng');
+    if (await bcrypt.compare(dto.newPassword, user.passwordHash)) {
+      throw new BadRequestException('Mật khẩu mới phải khác mật khẩu hiện tại');
+    }
+    await this.prisma.user.update({
+      where: { id },
+      data: {
+        passwordHash: await bcrypt.hash(
+          dto.newPassword,
+          appEnv.bcryptSaltRounds,
+        ),
+      },
+    });
+    return { ok: true };
   }
 
   async setStatus(id: string, currentUserId: string, isActive: boolean) {

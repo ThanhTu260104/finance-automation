@@ -78,6 +78,13 @@ export async function uploadMyAvatar(file: File): Promise<User> {
   return data;
 }
 
+export async function changeMyPassword(payload: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<void> {
+  await api.patch("/users/me/password", payload);
+}
+
 export function userAvatarFullUrl(urlPath?: string | null): string | null {
   return urlPath ? new URL(urlPath, getApiOrigin()).toString() : null;
 }

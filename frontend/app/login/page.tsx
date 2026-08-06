@@ -18,7 +18,7 @@ import { siteConfig } from "@/config/site";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login } = useUser();
+  const { currentUser, loading: sessionLoading, login } = useUser();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -28,6 +28,10 @@ export default function LoginPage() {
   useEffect(() => {
     router.prefetch("/proposals");
   }, [router]);
+
+  useEffect(() => {
+    if (!sessionLoading && currentUser) router.replace("/proposals");
+  }, [currentUser, router, sessionLoading]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -46,6 +50,14 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (sessionLoading || currentUser) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f3f8f6] text-sm text-slate-500">
+        Đang khôi phục phiên đăng nhập...
+      </main>
+    );
+  }
 
   return (
     <main className="relative h-[100dvh] overflow-hidden bg-[#f3f8f6] text-slate-900">
@@ -202,6 +214,9 @@ export default function LoginPage() {
               {loading ? "Đang đăng nhập..." : "Đăng nhập"}
               <ArrowRight className="h-4 w-4" />
             </button>
+            <a href="/forgot-password" className="mt-3 block text-center text-sm font-semibold text-emerald-700 hover:text-emerald-800">
+              Quên mật khẩu?
+            </a>
 
             <a
               href={`tel:${siteConfig.supportPhone}`}

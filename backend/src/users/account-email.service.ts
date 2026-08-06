@@ -14,6 +14,41 @@ export type EmailDeliveryResult =
 
 @Injectable()
 export class AccountEmailService {
+  async sendPasswordResetCode(account: {
+    email: string;
+    fullName: string;
+    code: string;
+  }): Promise<EmailDeliveryResult> {
+    if (!appEnv.smtpHost || !appEnv.smtpUser || !appEnv.smtpPassword || !appEnv.smtpFrom) {
+      return { sent: false, error: 'SMTP chưa được cấu hình' };
+    }
+    const transporter = this.createTransporter();
+    try {
+      await transporter.sendMail({
+        from: appEnv.smtpFrom,
+        replyTo: appEnv.smtpReplyTo || appEnv.smtpUser,
+        to: account.email,
+        subject: '[SAW Requests] Mã xác thực đổi mật khẩu',
+        text: `Xin chào ${account.fullName},\n\nMã xác thực đổi mật khẩu của bạn là: ${account.code}\nMã có hiệu lực trong 10 phút. Không cung cấp mã này cho người khác.`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto"><h2>Đổi mật khẩu SAW Requests</h2><p>Xin chào <strong>${this.escapeHtml(account.fullName)}</strong>,</p><p>Mã xác thực của bạn:</p><div style="font-size:30px;font-weight:700;letter-spacing:8px;background:#f1f5f9;padding:16px;text-align:center;border-radius:12px">${account.code}</div><p>Mã có hiệu lực trong 10 phút. Không cung cấp mã này cho người khác.</p></div>`,
+      });
+      return { sent: true };
+    } catch (error) {
+      return { sent: false, error: error instanceof Error ? error.message : 'Không gửi được email' };
+    }
+  }
+
+  private createTransporter() {
+    return nodemailer.createTransport({
+      host: appEnv.smtpHost,
+      port: appEnv.smtpPort,
+      secure: appEnv.smtpSecure,
+      requireTLS: !appEnv.smtpSecure,
+      tls: { minVersion: 'TLSv1.2' },
+      auth: { user: appEnv.smtpUser, pass: appEnv.smtpPassword },
+    });
+  }
+
   async sendWelcomeEmail(account: WelcomeAccount): Promise<EmailDeliveryResult> {
     if (
       !appEnv.smtpHost ||
@@ -24,19 +59,7 @@ export class AccountEmailService {
       return { sent: false, error: 'SMTP chưa được cấu hình' };
     }
 
-    const transporter = nodemailer.createTransport({
-      host: appEnv.smtpHost,
-      port: appEnv.smtpPort,
-      secure: appEnv.smtpSecure,
-      requireTLS: !appEnv.smtpSecure,
-      tls: {
-        minVersion: 'TLSv1.2',
-      },
-      auth: {
-        user: appEnv.smtpUser,
-        pass: appEnv.smtpPassword,
-      },
-    });
+    const transporter = this.createTransporter();
 
     try {
       await transporter.sendMail({

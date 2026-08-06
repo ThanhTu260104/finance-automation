@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useUser } from "@/lib/context/UserContext";
-import { updateMyProfile, uploadMyAvatar, userAvatarFullUrl } from "@/lib/api/users";
+import { changeMyPassword, updateMyProfile, uploadMyAvatar, userAvatarFullUrl } from "@/lib/api/users";
 
 function initials(name: string) {
   return name.trim().split(/\s+/).slice(-2).map((part) => part[0]?.toUpperCase()).join("") || "?";
@@ -19,6 +19,10 @@ export default function ProfilePage() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -45,6 +49,21 @@ export default function ProfilePage() {
       toast.error(error instanceof Error ? error.message : "Không thể cập nhật tài khoản", { id: toastId });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const savePassword = async () => {
+    if (newPassword.length < 8) return toast.error("Mật khẩu mới phải có ít nhất 8 ký tự");
+    if (newPassword !== confirmPassword) return toast.error("Mật khẩu nhập lại không khớp");
+    setChangingPassword(true);
+    try {
+      await changeMyPassword({ currentPassword, newPassword });
+      setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
+      toast.success("Đã đổi mật khẩu");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không thể đổi mật khẩu");
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -128,6 +147,16 @@ export default function ProfilePage() {
             </button>
           </div>
         </div>
+      </Card>
+      <Card className="mt-6">
+        <h2 className="text-lg font-semibold text-slate-900">Đổi mật khẩu</h2>
+        <p className="mt-1 text-sm text-slate-500">Nhập mật khẩu hiện tại để đặt mật khẩu mới.</p>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <label className="sm:col-span-2"><span className="mb-2 block text-sm font-medium text-slate-700">Mật khẩu hiện tại</span><input type="password" autoComplete="current-password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className="profile-input" /></label>
+          <label><span className="mb-2 block text-sm font-medium text-slate-700">Mật khẩu mới</span><input type="password" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="profile-input" /></label>
+          <label><span className="mb-2 block text-sm font-medium text-slate-700">Nhập lại mật khẩu mới</span><input type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="profile-input" /></label>
+        </div>
+        <div className="mt-5 flex justify-end"><button type="button" disabled={changingPassword || !currentPassword || !newPassword || !confirmPassword} onClick={savePassword} className="rounded-xl bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{changingPassword ? "Đang đổi..." : "Đổi mật khẩu"}</button></div>
       </Card>
       <style jsx>{`.profile-input { width: 100%; border-radius: .75rem; border: 1px solid var(--color-border, #e2e8f0); padding: .625rem .75rem; font-size: .875rem; outline: none; } .profile-input:focus { border-color: #16a34a; box-shadow: 0 0 0 2px rgb(34 197 94 / .2); }`}</style>
     </div>
