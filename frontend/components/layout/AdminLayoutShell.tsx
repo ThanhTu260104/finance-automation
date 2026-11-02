@@ -7,6 +7,7 @@ import { AdminSidebar } from "@/components/layout/AdminSidebar";
 import { adminNavItems } from "@/config/navigation";
 import { useUser } from "@/lib/context/UserContext";
 import { hasPermission, type AppPermission } from "@/lib/permissions";
+import { AdminPageHeaderProvider } from "@/lib/context/AdminPageHeaderContext";
 import { cn } from "@/lib/utils/cn";
 
 export function AdminLayoutShell({ children }: { children: React.ReactNode }) {
@@ -69,6 +70,7 @@ export function AdminLayoutShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
+    <AdminPageHeaderProvider>
     <div className="flex min-h-screen bg-surface-muted font-sans">
       <div
         className={cn(
@@ -94,6 +96,7 @@ export function AdminLayoutShell({ children }: { children: React.ReactNode }) {
         <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-5 pt-20 sm:px-5 sm:pt-24 lg:px-8 lg:pb-8">{children}</main>
       </div>
     </div>
+    </AdminPageHeaderProvider>
   );
 }
 

@@ -485,22 +485,6 @@ export function ProposalForm() {
               </>}
             </div>
 
-            <div className="space-y-4 border-t border-border pt-4">
-              <ProposalFileUpload
-                label="Hợp đồng / Báo giá"
-                kind="CONTRACT"
-                files={localFiles}
-                onAdd={(files) => addFiles("CONTRACT", files)}
-                onRemove={removeFile}
-              />
-              <ProposalFileUpload
-                label="Hóa đơn tài chính"
-                kind="INVOICE"
-                files={localFiles}
-                onAdd={(files) => addFiles("INVOICE", files)}
-                onRemove={removeFile}
-              />
-            </div>
           </Card>
 
           {/* Description & attachments */}
@@ -523,7 +507,7 @@ export function ProposalForm() {
             </label>
 
             <ProposalFileUpload
-              label="Tài liệu nội dung đính kèm"
+              label="Nội dung tài liệu"
               kind="CONTENT"
               files={localFiles}
               onAdd={(files) => addFiles("CONTENT", files)}

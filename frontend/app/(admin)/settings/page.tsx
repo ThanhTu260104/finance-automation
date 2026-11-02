@@ -107,7 +107,11 @@ export default function SettingsPage() {
 
   const loadAll = () => {
     setLoading(true);
-    Promise.all([getWorkflows(), getProposalTypes(), getUsers()])
+    Promise.all([
+      getWorkflows(),
+      getProposalTypes(undefined, { includeInactive: true, forceRefresh: true }),
+      getUsers(),
+    ])
       .then(([workflowRows, typeRows, userRows]) => {
         setWorkflows(workflowRows);
         setTypes(typeRows);
@@ -161,6 +165,18 @@ export default function SettingsPage() {
     });
   }, [search, statusFilter, typeById, typeFilter, workflows]);
 
+  const filteredUnconfiguredTypes = useMemo(() => {
+    const configuredTypeIds = new Set(workflows.map((workflow) => workflow.proposalTypeId));
+    const q = search.trim().toLowerCase();
+    return types.filter(
+      (type) =>
+        !configuredTypeIds.has(type.id) &&
+        (!q || type.name.toLowerCase().includes(q)) &&
+        (!typeFilter || type.id === typeFilter) &&
+        statusFilter === "all",
+    );
+  }, [search, statusFilter, typeFilter, types, workflows]);
+
   const stats = useMemo(
     () => ({
       total: workflows.length,
@@ -189,8 +205,26 @@ export default function SettingsPage() {
     setSaveError(null);
   };
 
+  const refreshProposalTypes = () =>
+    getProposalTypes(undefined, { includeInactive: true, forceRefresh: true }).then(setTypes);
+
   const openCreate = () => {
+    // The proposal type may have been added from another screen or browser tab.
+    // Refresh in the background so it is available in the workflow form immediately.
+    void refreshProposalTypes();
     setForm(EMPTY_FORM);
+    setEditingWorkflow(null);
+    setTouched(false);
+    setSaveError(null);
+    setModalMode("create");
+  };
+
+  const openCreateForType = (type: ProposalType) => {
+    setForm({
+      ...EMPTY_FORM,
+      name: `Quy trình duyệt ${type.name}`,
+      proposalTypeId: type.id,
+    });
     setEditingWorkflow(null);
     setTouched(false);
     setSaveError(null);
@@ -479,7 +513,7 @@ export default function SettingsPage() {
         <Card>
           <LoadingRow label="Đang tải quy trình phê duyệt..." />
         </Card>
-      ) : filteredWorkflows.length === 0 ? (
+      ) : filteredWorkflows.length === 0 && filteredUnconfiguredTypes.length === 0 ? (
         <Card>
           <div className="py-14 text-center text-sm text-slate-400">
             Không tìm thấy quy trình phù hợp
@@ -487,6 +521,13 @@ export default function SettingsPage() {
         </Card>
       ) : (
         <div className="space-y-3">
+          {filteredUnconfiguredTypes.map((type) => (
+            <UnconfiguredTypeCard
+              key={type.id}
+              proposalType={type}
+              onConfigure={() => openCreateForType(type)}
+            />
+          ))}
           {filteredWorkflows.map((workflow) => (
             <WorkflowCard
               key={workflow.id}
@@ -655,6 +696,40 @@ function WorkflowCard({
             Sửa
           </button>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+function UnconfiguredTypeCard({
+  proposalType,
+  onConfigure,
+}: {
+  proposalType: ProposalType;
+  onConfigure: () => void;
+}) {
+  return (
+    <Card padding="sm" className="border-amber-200 bg-amber-50/40">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-slate-800">{proposalType.name}</h2>
+            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+              Chưa cấu hình quy trình
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-slate-500">
+            Loại đề xuất này chưa có người duyệt và người liên quan.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onConfigure}
+          className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-primary-700"
+        >
+          <Plus className="h-4 w-4" />
+          Cấu hình ngay
+        </button>
       </div>
     </Card>
   );

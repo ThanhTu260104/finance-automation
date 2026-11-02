@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import * as XLSX from "xlsx";
 import { VirtualExcelTable } from "@/components/proposals/VirtualExcelTable";
 import {
-  extractSheetPreview,
+  extractStyledSheetPreviewFromBuffer,
+  listSheetNamesFromBuffer,
   PREVIEW_MAX_COLS,
   PREVIEW_MAX_ROWS,
-} from "@/lib/excel/extractSheetPreview";
+  type StyledSheetPreview,
+} from "@/lib/excel/extractStyledSheetPreview";
 import { cn } from "@/lib/utils/cn";
 
 type ExcelPreviewProps = {
@@ -17,16 +18,8 @@ type ExcelPreviewProps = {
 };
 
 type WorkbookCacheEntry = {
-  workbook: XLSX.WorkBook;
-};
-
-const READ_OPTIONS: XLSX.ParsingOptions = {
-  type: "array",
-  dense: true,
-  cellFormula: false,
-  cellHTML: false,
-  cellStyles: false,
-  sheetRows: PREVIEW_MAX_ROWS,
+  sheetNames: string[];
+  sheets: Map<number, StyledSheetPreview>;
 };
 
 const workbookCache = new Map<string, WorkbookCacheEntry>();
@@ -50,15 +43,13 @@ async function loadWorkbookBuffer(url: string, file?: File): Promise<ArrayBuffer
   return response.arrayBuffer();
 }
 
-function parseWorkbook(buffer: ArrayBuffer): XLSX.WorkBook {
-  return XLSX.read(buffer, READ_OPTIONS);
-}
-
 export function ExcelPreview({ url, file, className }: ExcelPreviewProps) {
-  const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [sheets, setSheets] = useState<Map<number, StyledSheetPreview>>(new Map());
   const [activeSheet, setActiveSheet] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [buffer, setBuffer] = useState<ArrayBuffer | null>(null);
 
   const cacheKey = useMemo(() => getCacheKey(url, file), [url, file]);
 
@@ -68,13 +59,16 @@ export function ExcelPreview({ url, file, className }: ExcelPreviewProps) {
     async function load() {
       setLoading(true);
       setError(null);
-      setWorkbook(null);
+      setSheetNames([]);
+      setSheets(new Map());
       setActiveSheet(0);
+      setBuffer(null);
 
       const cached = workbookCache.get(cacheKey);
       if (cached) {
         if (!cancelled) {
-          setWorkbook(cached.workbook);
+          setSheetNames(cached.sheetNames);
+          setSheets(cached.sheets);
           setLoading(false);
         }
         return;
@@ -86,14 +80,26 @@ export function ExcelPreview({ url, file, className }: ExcelPreviewProps) {
         });
         if (cancelled) return;
 
-        const buffer = await loadWorkbookBuffer(url, file);
+        const loadedBuffer = await loadWorkbookBuffer(url, file);
         if (cancelled) return;
 
-        const parsed = parseWorkbook(buffer);
-        workbookCache.set(cacheKey, { workbook: parsed });
+        const names = await listSheetNamesFromBuffer(loadedBuffer.slice(0));
+        const firstPreview = await extractStyledSheetPreviewFromBuffer(
+          loadedBuffer.slice(0),
+          0,
+          PREVIEW_MAX_ROWS,
+          PREVIEW_MAX_COLS,
+        );
+
+        const sheetMap = new Map<number, StyledSheetPreview>();
+        sheetMap.set(0, firstPreview);
+
+        workbookCache.set(cacheKey, { sheetNames: names, sheets: sheetMap });
 
         if (!cancelled) {
-          setWorkbook(parsed);
+          setBuffer(loadedBuffer);
+          setSheetNames(names);
+          setSheets(sheetMap);
           setLoading(false);
         }
       } catch {
@@ -111,18 +117,36 @@ export function ExcelPreview({ url, file, className }: ExcelPreviewProps) {
     };
   }, [cacheKey, url, file]);
 
-  const sheetNames = useMemo(() => workbook?.SheetNames ?? [], [workbook]);
+  useEffect(() => {
+    if (!buffer || sheetNames.length === 0) return;
+    if (sheets.has(activeSheet)) return;
 
-  const previewData = useMemo(() => {
-    if (!workbook || sheetNames.length === 0) return null;
+    let cancelled = false;
 
-    const sheetIndex = Math.min(activeSheet, sheetNames.length - 1);
-    const sheetName = sheetNames[sheetIndex];
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) return null;
+    void extractStyledSheetPreviewFromBuffer(
+      buffer.slice(0),
+      activeSheet,
+      PREVIEW_MAX_ROWS,
+      PREVIEW_MAX_COLS,
+    ).then((preview) => {
+      if (cancelled) return;
+      setSheets((current) => {
+        const next = new Map(current);
+        next.set(activeSheet, preview);
+        const cached = workbookCache.get(cacheKey);
+        if (cached) {
+          cached.sheets.set(activeSheet, preview);
+        }
+        return next;
+      });
+    });
 
-    return extractSheetPreview(sheet, PREVIEW_MAX_ROWS, PREVIEW_MAX_COLS);
-  }, [workbook, sheetNames, activeSheet]);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSheet, buffer, cacheKey, sheetNames.length, sheets]);
+
+  const previewData = sheets.get(activeSheet) ?? null;
 
   if (error) {
     return (
@@ -160,7 +184,7 @@ export function ExcelPreview({ url, file, className }: ExcelPreviewProps) {
               type="button"
               onClick={() => setActiveSheet(index)}
               className={cn(
-                "rounded-lg px-3 py-1 text-xs font-medium",
+                "rounded-lg px-3 py-1 text-sm font-medium",
                 index === activeSheet
                   ? "bg-primary-600 text-white"
                   : "bg-surface-muted text-slate-600",
@@ -175,6 +199,8 @@ export function ExcelPreview({ url, file, className }: ExcelPreviewProps) {
       <VirtualExcelTable
         columns={previewData.columns}
         rows={previewData.rows}
+        columnWidthsPx={previewData.columnWidthsPx}
+        rowHeightsPx={previewData.rowHeightsPx}
         truncated={previewData.truncated}
         className="min-h-0 flex-1"
       />

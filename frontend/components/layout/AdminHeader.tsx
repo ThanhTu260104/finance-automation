@@ -3,6 +3,7 @@
 import { Bell, LogOut, Menu } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { siteConfig } from "@/config/site";
+import { useAdminPageHeader } from "@/lib/context/AdminPageHeaderContext";
 import { useUser } from "@/lib/context/UserContext";
 import { useEffect, useState } from "react";
 import { fetchNotifications, markNotificationRead, subscribeToNotifications } from "@/lib/api/notifications";
@@ -17,6 +18,9 @@ type AdminHeaderProps = {
 export function AdminHeader({ onToggleSidebar, sidebarCollapsed = false }: AdminHeaderProps) {
   const router = useRouter();
   const { currentUser, logout, loading: usersLoading } = useUser();
+  const { title: pageTitle, subtitle: pageSubtitle } = useAdminPageHeader();
+  const headerTitle = pageTitle ?? siteConfig.name;
+  const headerSubtitle = pageSubtitle ?? siteConfig.description;
 
   type NotificationItem = {
     id: string;
@@ -164,12 +168,14 @@ export function AdminHeader({ onToggleSidebar, sidebarCollapsed = false }: Admin
           <Menu className="h-5 w-5" />
         </button>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-800">
-            {siteConfig.shortName}
+          <p className="truncate text-sm font-semibold text-slate-800 sm:text-base">
+            {headerTitle}
           </p>
-          <p className="hidden truncate text-xs text-slate-500 sm:block">
-            Đề xuất & phê duyệt
-          </p>
+          {headerSubtitle ? (
+            <p className="hidden truncate text-xs text-slate-500 sm:block">
+              {headerSubtitle}
+            </p>
+          ) : null}
         </div>
       </div>
 

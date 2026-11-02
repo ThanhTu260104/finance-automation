@@ -12,10 +12,8 @@ import {
   CheckCircle2,
   Circle,
   Clock,
-  Copy,
   CreditCard,
   FileText,
-  FolderKanban,
   Landmark,
   MessageSquare,
   Pencil,
@@ -27,14 +25,12 @@ import {
   XOctagon,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { ProposalStatusBadge } from "@/components/proposals/ProposalStatusBadge";
 import {
   approveProposal,
   addProposalComment,
   cancelProposal,
   deleteProposal,
-  duplicateProposal,
   getProposal,
   getProposalComments,
   markProposalPaid,
@@ -44,6 +40,7 @@ import {
   type ProposalComment,
 } from "@/lib/api/proposals";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils/format";
+import { useAdminPageHeader } from "@/lib/context/AdminPageHeaderContext";
 import { useUser } from "@/lib/context/UserContext";
 import { ProposalFileReview } from "@/components/proposals/ProposalFileReview";
 import { userAvatarFullUrl } from "@/lib/api/users";
@@ -52,12 +49,6 @@ const PARTICIPANT_LABELS: Record<string, string> = {
   WATCHER: "Theo dõi",
   NOTIFY: "Nhận thông báo",
   EXECUTOR: "Thực hiện",
-};
-
-const PARTICIPANT_DOT: Record<string, string> = {
-  WATCHER: "bg-slate-400",
-  NOTIFY: "bg-sky-500",
-  EXECUTOR: "bg-primary-600",
 };
 
 const ACTION_MESSAGES: Record<
@@ -91,6 +82,13 @@ const ACTION_MESSAGES: Record<
   },
 };
 
+const APPROVAL_STEP_STATUS_LABELS: Record<string, string> = {
+  PENDING: "Chưa duyệt",
+  APPROVED: "Đã phê duyệt",
+  REJECTED: "Đã từ chối",
+  SKIPPED: "Bỏ qua",
+};
+
 // A small, self-contained info row: icon + label + value.
 // Keeping this as a tiny component keeps the summary grid consistent
 // and makes it trivial to add more fields later.
@@ -99,24 +97,22 @@ function InfoRow({
   label,
   children,
   emphasis,
-  span2,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   children: React.ReactNode;
   emphasis?: boolean;
-  span2?: boolean;
 }) {
   return (
-    <div className={`flex gap-3 ${span2 ? "sm:col-span-2" : ""}`}>
-      <div className="mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-slate-100 text-slate-500">
-        <Icon className="h-4 w-4" />
+    <div className="flex gap-2.5 py-1">
+      <div className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-md bg-slate-100 text-slate-500">
+        <Icon className="h-3.5 w-3.5" />
       </div>
-      <div className="min-w-0">
-        <p className="text-xs font-medium text-slate-500">{label}</p>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-slate-500">{label}</p>
         <p
-          className={`mt-0.5 break-words text-sm ${
-            emphasis ? "text-base font-semibold text-primary-700" : "text-slate-800"
+          className={`mt-0.5 break-words text-base leading-snug ${
+            emphasis ? "text-lg font-semibold text-primary-700" : "text-slate-800"
           }`}
         >
           {children}
@@ -130,6 +126,7 @@ export default function ProposalDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { currentUser } = useUser();
+  const { setHeader, clearHeader } = useAdminPageHeader();
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState("");
@@ -148,6 +145,15 @@ export default function ProposalDetailPage() {
   useEffect(() => {
     reload();
   }, [params.id]);
+
+  useEffect(() => {
+    if (!proposal) return;
+    const subtitle = `${proposal.code} · ${proposal.proposalType.name}${
+      proposal.workflow?.name ? ` · ${proposal.workflow.name}` : ""
+    }`;
+    setHeader(proposal.title, subtitle);
+    return () => clearHeader();
+  }, [proposal, setHeader, clearHeader]);
 
   useEffect(() => {
     let active = true;
@@ -231,8 +237,14 @@ export default function ProposalDetailPage() {
       setCommentSending(false);
     }
   };
+  // Kế toán chỉ được xác nhận thanh toán khi người duyệt cấp cao đã duyệt.
+  const seniorSteps = proposal.approvalSteps.filter((s) => s.isSeniorApprover);
+  const seniorApproved =
+    seniorSteps.length === 0 ||
+    seniorSteps.some((s) => s.status === "APPROVED");
   const canMarkPaid =
     ["PENDING_PAYMENT", "APPROVED"].includes(proposal.status) &&
+    seniorApproved &&
     isPaymentExecutor;
   const hasPaymentInfo =
     Boolean(proposal.paymentAmount) ||
@@ -315,108 +327,40 @@ export default function ProposalDetailPage() {
         Danh sách đề xuất
       </Link>
 
-      <PageHeader
-        title={proposal.title}
-        description={`${proposal.code} · ${proposal.proposalType.name}${
-          proposal.workflow?.name ? ` · ${proposal.workflow.name}` : ""
-        }`}
-        action={<ProposalStatusBadge status={proposal.status} />}
-      />
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <ProposalStatusBadge status={proposal.status} className="text-sm" />
+      </div>
 
-      <div className="grid min-w-0 gap-4 sm:gap-6 lg:grid-cols-3">
-        <div className="min-w-0 space-y-4 lg:col-span-2">
-          {/* General information */}
-          <Card>
-            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-400">
-              Thông tin chung
-            </h3>
-            <dl className="grid min-w-0 gap-4 sm:grid-cols-2 sm:gap-5">
-              <InfoRow icon={User} label="Người đề xuất">
-                {proposal.creator.fullName}
-              </InfoRow>
-              <InfoRow icon={Building2} label="Dự án">
-                {proposal.department?.name ?? "—"}
-              </InfoRow>
-              <InfoRow icon={FolderKanban} label="Dự án">
-                {proposal.projectName ?? "—"}
-              </InfoRow>
-              <InfoRow icon={Calendar} label="Ngày tạo">
-                {formatDateTime(proposal.createdAt)}
-              </InfoRow>
-              <InfoRow icon={CalendarClock} label="Hạn mong muốn">
-                {proposal.desiredDeadline
-                  ? formatDate(proposal.desiredDeadline)
-                  : "—"}
-              </InfoRow>
-              <InfoRow icon={CalendarClock} label="Hạn theo quy định">
-                {proposal.regulationDeadline
-                  ? formatDate(proposal.regulationDeadline)
-                  : "—"}
-              </InfoRow>
-            </dl>
+      <div className="grid min-w-0 gap-4 lg:grid-cols-3 lg:gap-5">
+        <div className="min-w-0 space-y-4 lg:order-1 lg:col-span-2">
+          {(proposal.attachments?.length ?? 0) > 0 && (
+            <ProposalFileReview attachments={proposal.attachments} />
+          )}
 
-            {proposal.content && (
-              <div className="mt-5 border-t border-border pt-4">
-                <p className="mb-1.5 text-xs font-medium text-slate-500">
-                  Nội dung mô tả
-                </p>
-                <p className="whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">
-                  {proposal.content}
-                </p>
-              </div>
-            )}
-
-            {proposal.status === "CANCELLED" && proposal.cancellationReason && (
-              <div className="mt-5 border-t border-border pt-4">
-                <p className="mb-1.5 text-xs font-medium text-slate-500">
-                  Lý do hủy đề xuất
-                </p>
-                <p className="whitespace-pre-wrap rounded-xl border border-rose-100 bg-rose-50 p-3 text-sm leading-relaxed text-rose-700">
-                  {proposal.cancellationReason}
-                </p>
-              </div>
-            )}
-          </Card>
-
-          {/* Payment information — only shown when relevant so the page
-              doesn't pad out every proposal with empty bank fields */}
           {shouldShowPaymentSection && (
-            <Card>
-              <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-400">
-                Thông tin thanh toán
-              </h3>
+            <Card padding="sm">
+              <h3 className="mb-2 text-sm font-semibold text-slate-700">Thông tin thanh toán</h3>
 
               {proposal.status === "PAID" && (
-                <div className="mb-5 flex min-w-0 items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-emerald-800 sm:gap-3 sm:px-4">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 flex-none text-emerald-600" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold">Đã thanh toán</p>
-                    <p className="mt-0.5 text-sm text-emerald-700">
-                      Kế toán đã xác nhận hoàn tất thanh toán cho đề xuất này.
-                    </p>
+                <div className="mb-3 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-emerald-800">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-emerald-600" />
+                  <div className="min-w-0 text-sm">
+                    <p className="font-semibold">Đã thanh toán</p>
                     {proposal.paidAt && (
-                      <p className="mt-1.5 text-sm font-medium text-emerald-800">
-                        Thời gian thực hiện thanh toán: {formatDateTime(proposal.paidAt)}
-                      </p>
+                      <p className="mt-0.5 text-emerald-700">{formatDateTime(proposal.paidAt)}</p>
                     )}
                   </div>
                 </div>
               )}
 
               {["PENDING_PAYMENT", "APPROVED"].includes(proposal.status) && (
-                <div className="mb-5 flex min-w-0 items-start gap-2.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-sky-800 sm:gap-3 sm:px-4">
-                  <Clock className="mt-0.5 h-5 w-5 flex-none text-sky-600" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold">Chờ thanh toán</p>
-                    <p className="mt-0.5 text-sm text-sky-700">
-                      Đề xuất đã được duyệt và đang chờ kế toán xác nhận thanh toán.
-                    </p>
-                  </div>
+                <div className="mb-3 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-2 text-sky-800">
+                  <Clock className="mt-0.5 h-4 w-4 flex-none text-sky-600" />
+                  <p className="text-sm font-medium text-sky-800">Chờ xác nhận thanh toán</p>
                 </div>
               )}
 
-              {/* Nhóm 1: số tiền + nội dung thanh toán — 2 cột đều nhau */}
-              <dl className="grid min-w-0 gap-4 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
+              <dl className="divide-y divide-border">
                 <InfoRow icon={Wallet} label="Số tiền" emphasis>
                   {proposal.paymentAmount
                     ? formatCurrency(Number(proposal.paymentAmount))
@@ -425,84 +369,31 @@ export default function ProposalDetailPage() {
                 <InfoRow icon={FileText} label="Nội dung thanh toán">
                   {proposal.paymentContent ?? "—"}
                 </InfoRow>
-                <InfoRow icon={CreditCard} label="Phương thức">
+                <InfoRow icon={CreditCard} label="Phương thức thanh toán">
                   {proposal.paymentMethod === "CASH" ? "Tiền mặt" : "Chuyển khoản"}
                 </InfoRow>
+                {proposal.paymentMethod === "CASH" ? (
+                  <InfoRow icon={User} label="Nơi / người nhận tiền">
+                    {proposal.cashRecipient || "—"}
+                  </InfoRow>
+                ) : (
+                  <>
+                    <InfoRow icon={User} label="Chủ tài khoản">
+                      {proposal.accountHolder ?? "—"}
+                    </InfoRow>
+                    <InfoRow icon={Landmark} label="Ngân hàng">
+                      {proposal.bankName ?? "—"}
+                    </InfoRow>
+                    <InfoRow icon={CreditCard} label="Số tài khoản">
+                      {proposal.accountNumber ?? "—"}
+                    </InfoRow>
+                  </>
+                )}
               </dl>
-
-              {/* Nhóm 2: thông tin tài khoản nhận — 3 cột đều nhau,
-                  tách riêng bằng đường kẻ để nhóm ý nghĩa rõ ràng */}
-              {proposal.paymentMethod === "CASH" ? (
-              <dl className="mt-5 border-t border-border pt-5">
-                <InfoRow icon={User} label="Nơi/người nhận tiền">
-                  {proposal.cashRecipient || "—"}
-                </InfoRow>
-              </dl>
-              ) : (
-              <dl className="mt-5 grid min-w-0 gap-4 border-t border-border pt-5 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
-                <InfoRow icon={User} label="Chủ tài khoản">
-                  {proposal.accountHolder ?? "—"}
-                </InfoRow>
-                <InfoRow icon={Landmark} label="Ngân hàng">
-                  {proposal.bankName ?? "—"}
-                </InfoRow>
-                <InfoRow icon={CreditCard} label="Số tài khoản">
-                  {proposal.accountNumber ?? "—"}
-                </InfoRow>
-              </dl>
-              )}
             </Card>
           )}
 
-          {(proposal.attachments?.length ?? 0) > 0 && (
-            <ProposalFileReview attachments={proposal.attachments} />
-          )}
-
-          {proposal.participants.length > 0 && (
-            <Card padding="sm">
-              <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
-                Người liên quan
-              </h3>
-              <ul className="space-y-2">
-                {proposal.participants.map((p) => (
-                  <li
-                    key={`${p.role}-${p.user.id}`}
-                    className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600"
-                  >
-                    <span
-                      className={`h-1.5 w-1.5 flex-none rounded-full ${
-                        PARTICIPANT_DOT[p.role] ?? "bg-slate-400"
-                      }`}
-                    />
-                    <span className="min-w-0 break-words font-medium text-slate-800">
-                      {p.user.fullName}
-                    </span>
-                    <span className="text-slate-400">·</span>
-                    <span>{PARTICIPANT_LABELS[p.role] ?? p.role}</span>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          )}
-
-          {canApprove && (
-            <Card padding="sm" className="border-primary-200 bg-primary-50/40">
-              <label className="block text-sm">
-                <span className="mb-1.5 block font-medium text-slate-700">
-                  Ghi chú duyệt
-                </span>
-                <textarea
-                  rows={2}
-                  className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm"
-                  placeholder="Thêm ý kiến khi phê duyệt (không bắt buộc)"
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                />
-              </label>
-            </Card>
-          )}
-
-          <div className="grid grid-cols-1 gap-2 border-t border-border pt-4 min-[390px]:grid-cols-2 sm:flex sm:flex-wrap sm:items-center [&>*]:min-w-0 [&>*]:justify-center">
+          <div className="grid grid-cols-1 gap-2 border-t border-border pt-3 min-[390px]:grid-cols-2 sm:flex sm:flex-wrap sm:items-center [&>*]:min-w-0 [&>*]:justify-center">
             {canApprove && (
               <>
                 <button
@@ -554,7 +445,7 @@ export default function ProposalDetailPage() {
                 className="inline-flex items-center gap-1.5 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
                 <CreditCard className="h-4 w-4" />
-                Đã thanh toán
+                Xác nhận thanh toán
               </button>
             )}
 
@@ -567,33 +458,6 @@ export default function ProposalDetailPage() {
                 Chỉnh sửa
               </Link>
             )}
-
-            <button
-              type="button"
-              disabled={actionPending !== null}
-              onClick={async () => {
-                setActionPending("duplicate");
-                const toastId = toast.loading("Đang nhân bản đề xuất...");
-                try {
-                  const copy = await duplicateProposal(proposal.id);
-                  toast.success("Đã nhân bản đề xuất", { id: toastId });
-                  router.push(`/proposals/${copy.id}/edit`);
-                } catch (err) {
-                  toast.error(
-                    err instanceof Error
-                      ? err.message
-                      : "Không thể nhân bản đề xuất",
-                    { id: toastId },
-                  );
-                } finally {
-                  setActionPending(null);
-                }
-              }}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-primary-200 px-4 py-2 text-sm font-medium text-primary-700 hover:bg-primary-50 disabled:opacity-60"
-            >
-              <Copy className="h-4 w-4" />
-              Nhân bản
-            </button>
 
             {isCreator && ["DRAFT", "PENDING"].includes(proposal.status) && (
               <button
@@ -639,20 +503,19 @@ export default function ProposalDetailPage() {
           </div>
         </div>
 
-        {/* Approval workflow timeline and discussion */}
-        <div className="min-w-0 space-y-4 sm:space-y-5 lg:sticky lg:top-24 lg:self-start">
-        <Card>
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-800">Quy trình duyệt</h3>
+        <div className="min-w-0 space-y-3 lg:order-2 lg:col-span-1 lg:sticky lg:top-24 lg:self-start">
+        <Card padding="sm">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-800">Quy trình phê duyệt</h3>
             {totalSteps > 0 && (
-              <span className="text-xs font-medium text-slate-400">
+              <span className="text-sm font-medium text-slate-400">
                 {doneSteps}/{totalSteps} bước
               </span>
             )}
           </div>
 
           {totalSteps > 0 && (
-            <div className="mb-5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+            <div className="mb-3 h-1 w-full overflow-hidden rounded-full bg-slate-100">
               <div
                 className="h-full rounded-full bg-success transition-all"
                 style={{ width: `${(doneSteps / totalSteps) * 100}%` }}
@@ -662,7 +525,7 @@ export default function ProposalDetailPage() {
 
           <ol className="relative">
             {totalSteps === 0 ? (
-              <p className="text-sm text-slate-500">Chưa gửi duyệt</p>
+              <p className="text-base text-slate-500">Chưa gửi duyệt</p>
             ) : (
               proposal.approvalSteps.map((step, idx) => {
                 const isCurrent =
@@ -691,33 +554,39 @@ export default function ProposalDetailPage() {
                         : "text-slate-300";
 
                 return (
-                  <li key={step.id} className="relative flex gap-3 pb-5 last:pb-0">
+                  <li key={step.id} className="relative flex gap-2 pb-3 last:pb-0">
                     {!isLast && (
                       <span
-                        className="absolute left-[11px] top-6 h-full w-px bg-border"
+                        className="absolute left-[9px] top-5 h-full w-px bg-border"
                         aria-hidden
                       />
                     )}
                     <StatusIcon
-                      className={`z-10 mt-0.5 h-[22px] w-[22px] flex-none bg-white ${iconColor}`}
+                      className={`z-10 mt-0.5 h-[18px] w-[18px] flex-none bg-white ${iconColor}`}
                     />
                     <div
-                      className={`min-w-0 flex-1 rounded-xl px-3 py-2 text-sm ${
+                      className={`min-w-0 flex-1 rounded-lg px-2 py-1.5 ${
                         isCurrent
                           ? "border border-primary-200 bg-primary-50"
                           : ""
                       }`}
                     >
-                      <div className="flex items-center gap-2.5">
-                        <ApproverAvatar name={step.approver.fullName} avatarUrl={step.approver.avatarUrl} />
+                      <div className="flex items-center gap-2">
+                        <ApproverAvatar
+                          name={step.approver.fullName}
+                          avatarUrl={step.approver.avatarUrl}
+                          size="sm"
+                        />
                         <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium text-slate-800">
+                          <p className="truncate text-base font-medium text-slate-800">
                             Bước {step.stepOrder} · {step.approver.fullName}
                           </p>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                            <span className="text-xs text-slate-500">{step.status}</span>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                            <span className="text-sm text-slate-600">
+                              {APPROVAL_STEP_STATUS_LABELS[step.status] ?? step.status}
+                            </span>
                             {senior && (
-                              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                              <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700">
                                 Duyệt cấp cao
                               </span>
                             )}
@@ -725,13 +594,13 @@ export default function ProposalDetailPage() {
                         </div>
                       </div>
                       {step.comment && (
-                        <p className="mt-1.5 break-words rounded-lg bg-slate-50 px-2 py-1.5 text-xs text-slate-600">
+                        <p className="mt-1 break-words rounded-md bg-slate-50 px-2 py-1 text-sm text-slate-600">
                           {step.comment}
                         </p>
                       )}
                       {step.actedAt && (
-                        <p className="mt-1.5 text-xs font-medium text-slate-500">
-                          Thời gian xử lý: {formatDateTime(step.actedAt)}
+                        <p className="mt-1 text-sm text-slate-500">
+                          {formatDateTime(step.actedAt)}
                         </p>
                       )}
                     </div>
@@ -740,54 +609,126 @@ export default function ProposalDetailPage() {
               })
             )}
           </ol>
+
+          {proposal.participants.length > 0 && (
+            <div className="mt-3 border-t border-border pt-3 text-base leading-relaxed text-slate-800">
+              <p className="mb-1 text-sm font-semibold text-slate-700">Người liên quan</p>
+              <p className="text-slate-700">
+                {proposal.participants.map((p, index) => (
+                  <span key={`${p.role}-${p.user.id}`}>
+                    {index > 0 ? "; " : ""}
+                    {p.user.fullName} ({PARTICIPANT_LABELS[p.role] ?? p.role})
+                  </span>
+                ))}
+              </p>
+            </div>
+          )}
         </Card>
-        {canComment && (
-          <Card>
-            <div className="mb-4 flex min-w-0 items-start justify-between gap-3">
-              <div>
-                <h3 className="flex items-center gap-2 font-semibold text-slate-800">
-                  <MessageSquare className="h-4 w-4 text-primary-600" />
-                  Ý kiến trao đổi
-                </h3>
-                <p className="mt-1 text-xs text-slate-500">
-                  Yêu cầu bổ sung hồ sơ hoặc phản hồi mà không cần từ chối đề xuất.
+
+          <Card padding="sm">
+            <h3 className="mb-2 text-sm font-semibold text-slate-700">Thông tin chung</h3>
+            <dl className="divide-y divide-border">
+              <InfoRow icon={User} label="Người đề xuất">
+                {proposal.creator.fullName}
+              </InfoRow>
+              <InfoRow icon={Building2} label="Phòng ban">
+                {proposal.department?.name ?? "—"}
+              </InfoRow>
+              {proposal.projectName ? (
+                <InfoRow icon={FileText} label="Dự án">
+                  {proposal.projectName}
+                </InfoRow>
+              ) : null}
+              <InfoRow icon={Calendar} label="Ngày tạo">
+                {formatDateTime(proposal.createdAt)}
+              </InfoRow>
+              <InfoRow icon={CalendarClock} label="Hạn mong muốn">
+                {proposal.desiredDeadline ? formatDate(proposal.desiredDeadline) : "—"}
+              </InfoRow>
+              <InfoRow icon={CalendarClock} label="Hạn theo quy định">
+                {proposal.regulationDeadline
+                  ? formatDate(proposal.regulationDeadline)
+                  : "—"}
+              </InfoRow>
+            </dl>
+
+            {proposal.content && (
+              <div className="mt-3 border-t border-border pt-3">
+                <p className="text-sm font-medium text-slate-500">Nội dung mô tả</p>
+                <p className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-50 p-2.5 text-base leading-relaxed text-slate-700">
+                  {proposal.content}
                 </p>
               </div>
+            )}
+
+            {proposal.status === "CANCELLED" && proposal.cancellationReason && (
+              <div className="mt-3 border-t border-border pt-3">
+                <p className="text-sm font-medium text-slate-500">Lý do hủy đề xuất</p>
+                <p className="mt-1 whitespace-pre-wrap rounded-lg border border-rose-100 bg-rose-50 p-2.5 text-base text-rose-700">
+                  {proposal.cancellationReason}
+                </p>
+              </div>
+            )}
+          </Card>
+
+          {canApprove && (
+            <Card padding="sm" className="border-primary-200 bg-primary-50/40">
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-slate-700">Ghi chú duyệt</span>
+                <textarea
+                  rows={2}
+                  className="w-full rounded-lg border border-border bg-white px-3 py-2 text-base"
+                  placeholder="Thêm ý kiến khi phê duyệt (không bắt buộc)"
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                />
+              </label>
+            </Card>
+          )}
+
+        {canComment && (
+          <Card padding="sm">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                <MessageSquare className="h-4 w-4 text-primary-600" />
+                Ý kiến trao đổi
+              </h3>
               {comments.length > 0 && (
-                <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-sm font-medium text-slate-500">
                   {comments.length}
                 </span>
               )}
             </div>
 
-            <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
+            <div className="max-h-56 space-y-2 overflow-y-auto">
               {commentsLoading ? (
-                <div className="py-5 text-center text-sm text-slate-400">Đang tải ý kiến...</div>
+                <div className="py-4 text-center text-base text-slate-400">Đang tải...</div>
               ) : comments.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-sm text-slate-400">
-                  Chưa có ý kiến trao đổi
+                <div className="rounded-lg border border-dashed border-border px-2 py-4 text-center text-base text-slate-400">
+                  Chưa có ý kiến
                 </div>
               ) : (
                 comments.map((item) => {
                   const mine = item.author.id === currentUser?.id;
                   return (
-                    <div key={item.id} className={`flex gap-2.5 ${mine ? "flex-row-reverse" : ""}`}>
+                    <div key={item.id} className={`flex gap-2 ${mine ? "flex-row-reverse" : ""}`}>
                       <ApproverAvatar
                         name={item.author.fullName}
                         avatarUrl={item.author.avatarUrl}
+                        size="sm"
                       />
-                      <div className={`min-w-0 max-w-[calc(100%-2.75rem)] sm:max-w-[85%] ${mine ? "text-right" : ""}`}>
+                      <div className={`min-w-0 max-w-[88%] ${mine ? "text-right" : ""}`}>
                         <div
-                          className={`break-words rounded-2xl px-3 py-2 text-left text-sm leading-5 ${
+                          className={`break-words rounded-xl px-2.5 py-1.5 text-left text-base leading-snug ${
                             mine
-                              ? "rounded-tr-md bg-primary-600 text-white"
-                              : "rounded-tl-md bg-slate-100 text-slate-700"
+                              ? "rounded-tr-sm bg-primary-600 text-white"
+                              : "rounded-tl-sm bg-slate-100 text-slate-700"
                           }`}
                         >
                           {item.content}
                         </div>
-                        <p className="mt-1 break-words px-1 text-[11px] text-slate-400">
-                          {item.author.fullName} · {formatDateTime(item.createdAt)}
+                        <p className="mt-0.5 px-1 text-sm text-slate-400">
+                          {formatDateTime(item.createdAt)}
                         </p>
                       </div>
                     </div>
@@ -796,9 +737,9 @@ export default function ProposalDetailPage() {
               )}
             </div>
 
-            <div className="mt-4 border-t border-border pt-4">
+            <div className="mt-3 border-t border-border pt-3">
               <textarea
-                rows={3}
+                rows={2}
                 maxLength={2000}
                 value={commentText}
                 onChange={(event) => setCommentText(event.target.value)}
@@ -808,21 +749,18 @@ export default function ProposalDetailPage() {
                     sendComment();
                   }
                 }}
-                placeholder="Nhập ý kiến hoặc nội dung cần bổ sung..."
-                className="w-full resize-none rounded-xl border border-border px-3 py-2.5 text-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+                placeholder="Nhập ý kiến..."
+                className="w-full resize-none rounded-lg border border-border px-3 py-2 text-base outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
               />
-              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                <span className="text-xs text-slate-400">Enter để gửi · Shift + Enter để xuống dòng</span>
-                <button
-                  type="button"
-                  disabled={!commentText.trim() || commentSending}
-                  onClick={sendComment}
-                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50 sm:w-auto"
-                >
-                  <Send className="h-4 w-4" />
-                  {commentSending ? "Đang gửi..." : "Gửi ý kiến"}
-                </button>
-              </div>
+              <button
+                type="button"
+                disabled={!commentText.trim() || commentSending}
+                onClick={sendComment}
+                className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-base font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                <Send className="h-4 w-4" />
+                {commentSending ? "Đang gửi..." : "Gửi ý kiến"}
+              </button>
             </div>
           </Card>
         )}
@@ -901,13 +839,36 @@ export default function ProposalDetailPage() {
   );
 }
 
-function ApproverAvatar({ name, avatarUrl }: { name: string; avatarUrl?: string | null }) {
+function ApproverAvatar({
+  name,
+  avatarUrl,
+  size = "md",
+}: {
+  name: string;
+  avatarUrl?: string | null;
+  size?: "sm" | "md";
+}) {
   const fullUrl = userAvatarFullUrl(avatarUrl);
-  const initials = name.trim().split(/\s+/).slice(-2).map((part) => part[0]?.toUpperCase()).join("") || "?";
+  const initials =
+    name
+      .trim()
+      .split(/\s+/)
+      .slice(-2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "?";
+  const dim = size === "sm" ? "h-8 w-8 text-[10px]" : "h-10 w-10 text-xs";
 
   return fullUrl ? (
-    <img src={fullUrl} alt={`Ảnh ${name}`} className="h-10 w-10 shrink-0 rounded-full border border-slate-200 object-cover" />
+    <img
+      src={fullUrl}
+      alt={`Ảnh ${name}`}
+      className={`${dim} shrink-0 rounded-full border border-slate-200 object-cover`}
+    />
   ) : (
-    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700">{initials}</span>
+    <span
+      className={`flex ${dim} shrink-0 items-center justify-center rounded-full bg-primary-100 font-bold text-primary-700`}
+    >
+      {initials}
+    </span>
   );
 }

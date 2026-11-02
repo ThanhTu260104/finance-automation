@@ -270,20 +270,6 @@ export default function EditProposalPage() {
               ))}
             </select>
           </label>
-          <ProposalFileUpload
-            label="Hợp đồng / Báo giá"
-            kind="CONTRACT"
-            files={localFiles}
-            onAdd={(files) => handleUpload("CONTRACT", files)}
-            onRemove={() => {}}
-          />
-          <ProposalFileUpload
-            label="Hóa đơn tài chính"
-            kind="INVOICE"
-            files={localFiles}
-            onAdd={(files) => handleUpload("INVOICE", files)}
-            onRemove={() => {}}
-          />
           <label className="block text-sm">
             <span className="mb-1 font-medium">
               Số tiền <RequiredMark />
@@ -378,7 +364,7 @@ export default function EditProposalPage() {
             />
           </label>
           <ProposalFileUpload
-            label="Tài liệu nội dung đính kèm"
+            label="Nội dung tài liệu"
             kind="CONTENT"
             files={localFiles}
             onAdd={(files) => handleUpload("CONTENT", files)}

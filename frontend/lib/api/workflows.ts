@@ -3,6 +3,7 @@ import api from "@/lib/api/client";
 const proposalTypesCache = new Map<string, { expiresAt: number; data: ProposalType[] }>();
 const proposalTypesPending = new Map<string, Promise<ProposalType[]>>();
 const PROPOSAL_TYPES_CACHE_MS = 5 * 60 * 1000;
+let proposalTypesCacheGeneration = 0;
 
 export type ProposalGroup = "FINANCE" | "PROCUREMENT";
 
@@ -45,28 +46,36 @@ export type ApprovalWorkflow = {
 
 export async function getProposalTypes(
   group?: ProposalGroup,
-  options?: { includeInactive?: boolean; includeWorkflows?: boolean },
+  options?: {
+    includeInactive?: boolean;
+    includeWorkflows?: boolean;
+    forceRefresh?: boolean;
+  },
 ): Promise<ProposalType[]> {
   const cacheKey = `${group ?? "ALL"}:${options?.includeInactive ? "inactive" : "active"}:${options?.includeWorkflows === false ? "lite" : "full"}`;
   const cached = proposalTypesCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.data;
+  if (!options?.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.data;
   const pending = proposalTypesPending.get(cacheKey);
-  if (pending) return pending;
+  if (!options?.forceRefresh && pending) return pending;
 
   const params = {
     ...(group ? { group } : {}),
     ...(options?.includeInactive ? { includeInactive: "true" } : {}),
     ...(options?.includeWorkflows === false ? { includeWorkflows: "false" } : {}),
   };
+  const cacheGeneration = proposalTypesCacheGeneration;
   const request = api
     .get<ProposalType[]>("/proposal-types", {
       params: Object.keys(params).length > 0 ? params : undefined,
     })
     .then(({ data }) => {
-      proposalTypesCache.set(cacheKey, {
-        data,
-        expiresAt: Date.now() + PROPOSAL_TYPES_CACHE_MS,
-      });
+      // A request started before a create/update/delete must not restore stale data.
+      if (cacheGeneration === proposalTypesCacheGeneration) {
+        proposalTypesCache.set(cacheKey, {
+          data,
+          expiresAt: Date.now() + PROPOSAL_TYPES_CACHE_MS,
+        });
+      }
       return data;
     })
     .finally(() => proposalTypesPending.delete(cacheKey));
@@ -75,6 +84,7 @@ export async function getProposalTypes(
 }
 
 function clearProposalTypesCache() {
+  proposalTypesCacheGeneration += 1;
   proposalTypesCache.clear();
 }
 

@@ -1289,15 +1289,6 @@ export class ProposalsService {
     const userId = this.userContext.requireUserId(rawUserId);
     const proposal = await this.findOne(id);
 
-    if (
-      proposal.status !== ProposalStatus.PENDING_PAYMENT &&
-      proposal.status !== ProposalStatus.APPROVED
-    ) {
-      throw new BadRequestException(
-        'Chỉ xác nhận thanh toán cho đề xuất đang chờ thanh toán',
-      );
-    }
-
     const isExecutor = proposal.participants.some(
       (participant) =>
         participant.userId === userId &&
@@ -1307,6 +1298,29 @@ export class ProposalsService {
     if (!isExecutor) {
       throw new ForbiddenException(
         'Bạn không có quyền xác nhận thanh toán đề xuất',
+      );
+    }
+
+    // Chỉ thanh toán khi quy trình duyệt đã hoàn tất (BGĐ đã duyệt).
+    // Không bao giờ bỏ qua người duyệt cấp cao.
+    if (
+      proposal.status !== ProposalStatus.PENDING_PAYMENT &&
+      proposal.status !== ProposalStatus.APPROVED
+    ) {
+      throw new BadRequestException(
+        'Chỉ xác nhận thanh toán sau khi quy trình phê duyệt đã hoàn tất',
+      );
+    }
+
+    const seniorSteps = proposal.approvalSteps.filter(
+      (s) => s.isSeniorApprover,
+    );
+    if (
+      seniorSteps.length &&
+      !seniorSteps.some((s) => s.status === ApprovalStepStatus.APPROVED)
+    ) {
+      throw new BadRequestException(
+        'Chỉ xác nhận thanh toán sau khi người duyệt cấp cao đã duyệt',
       );
     }
 

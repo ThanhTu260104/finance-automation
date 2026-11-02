@@ -11,6 +11,7 @@ export type SheetPreviewData = {
 
 type DenseWorkSheet = WorkSheet & {
   "!data"?: (CellObject | undefined)[][];
+  [rowIndex: number]: (CellObject | undefined)[] | undefined;
 };
 
 function cellToString(cell: CellObject | null | undefined): string {
@@ -35,11 +36,23 @@ export function columnLabel(index: number): string {
 }
 
 function isDenseSheet(sheet: WorkSheet): sheet is DenseWorkSheet {
-  return Array.isArray(sheet["!data"]);
+  if (Array.isArray(sheet["!data"])) return true;
+
+  for (const key of Object.keys(sheet)) {
+    if (key.startsWith("!")) continue;
+    if (Array.isArray(sheet[key as keyof WorkSheet])) return true;
+  }
+
+  return false;
 }
 
 function getSheetDimensions(sheet: WorkSheet): { totalRows: number; totalCols: number } {
-  if (isDenseSheet(sheet)) {
+  const ref = sheet["!ref"];
+  if (!ref) return { totalRows: 0, totalCols: 0 };
+
+  const range = utils.decode_range(ref);
+
+  if (isDenseSheet(sheet) && Array.isArray(sheet["!data"])) {
     const data = sheet["!data"] ?? [];
     let totalCols = 0;
     for (const row of data) {
@@ -48,14 +61,35 @@ function getSheetDimensions(sheet: WorkSheet): { totalRows: number; totalCols: n
     return { totalRows: data.length, totalCols };
   }
 
-  const ref = sheet["!ref"];
-  if (!ref) return { totalRows: 0, totalCols: 0 };
-
-  const range = utils.decode_range(ref);
   return {
     totalRows: range.e.r - range.s.r + 1,
     totalCols: range.e.c - range.s.c + 1,
   };
+}
+
+function readDenseRowCells(
+  sheet: DenseWorkSheet,
+  rowIndex: number,
+  startCol: number,
+  colCount: number,
+): string[] {
+  const row: string[] = [];
+
+  if (Array.isArray(sheet["!data"])) {
+    const sourceRow = sheet["!data"][rowIndex] ?? [];
+    for (let colIndex = 0; colIndex < colCount; colIndex += 1) {
+      row.push(cellToString(sourceRow[colIndex]));
+    }
+    return row;
+  }
+
+  const sourceRow = sheet[rowIndex];
+  const rowCells = Array.isArray(sourceRow) ? sourceRow : [];
+  for (let colIndex = 0; colIndex < colCount; colIndex += 1) {
+    row.push(cellToString(rowCells[startCol + colIndex]));
+  }
+
+  return row;
 }
 
 export function extractSheetPreview(
@@ -75,23 +109,25 @@ export function extractSheetPreview(
     return { columns, rows, truncated };
   }
 
-  if (isDenseSheet(sheet)) {
-    const data = sheet["!data"] ?? [];
-    for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
-      const sourceRow = data[rowIndex] ?? [];
-      const row: string[] = [];
-      for (let colIndex = 0; colIndex < colCount; colIndex += 1) {
-        row.push(cellToString(sourceRow[colIndex]));
-      }
-      rows.push(row);
-    }
-    return { columns, rows, truncated };
-  }
-
   const ref = sheet["!ref"];
   if (!ref) return { columns, rows, truncated };
 
   const range = utils.decode_range(ref);
+
+  if (isDenseSheet(sheet)) {
+    for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+      rows.push(
+        readDenseRowCells(
+          sheet,
+          range.s.r + rowIndex,
+          range.s.c,
+          colCount,
+        ),
+      );
+    }
+    return { columns, rows, truncated };
+  }
+
   for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
     const row: string[] = [];
     for (let colIndex = 0; colIndex < colCount; colIndex += 1) {

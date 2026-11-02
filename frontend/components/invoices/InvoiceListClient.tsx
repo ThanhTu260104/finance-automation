@@ -229,7 +229,7 @@ export function InvoiceListClient() {
                           type="button"
                           disabled={actionId === invoice.id}
                           onClick={() => handleDuplicate(invoice.id)}
-                          className="rounded-lg p-2 text-slate-500 hover:bg-surface-muted hover:text-primary-600"
+                          className="rounded-lg  p-2 text-slate-500 hover:bg-surface-muted hover:text-primary-600"
                           title="Nhân bản"
                         >
                           <Copy className="h-4 w-4" />
